@@ -1,4 +1,3 @@
 pywin32
-ctypes
 pycaw
 psutil
