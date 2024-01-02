@@ -2,3 +2,7 @@
 .venv
 
 exceptions.txt
+/build
+/dist
+
+app_muter.spec

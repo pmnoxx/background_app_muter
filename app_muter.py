@@ -1,13 +1,24 @@
 from tkinter import Tk, Listbox, Button, Label, END
-from pycaw.pycaw import AudioUtilities
+from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
 import psutil
 import os
 import win32gui
 import win32process
+from tkinter import Checkbutton, IntVar
+
+from comtypes import CLSCTX_ALL
+import comtypes
+
+DEFAULT_EXCEPTION_LIST = ["chrome.exe", "firefox.exe", "msedge.exe"]
 
 # List to hold the names of processes that should not be muted
 exceptions_list = []
 to_unmute = []
+
+
+# Add a variable to keep track of the last foreground app's PID
+last_foreground_app_pid = None
+
 
 # Function to check if a specific process ID is the foreground window
 def is_foreground_process(pid):
@@ -56,8 +67,33 @@ def update_lists():
 
 # Function to mute/unmute applications
 def mute_unmute_apps():
+        global last_foreground_app_pid, skip_mute_last_app
         # Get the list of all the current sessions
         sessions = AudioUtilities.GetAllSessions()
+
+        non_zero_other = False
+        for session in sessions:
+            if session.Process:
+                process_id = session.ProcessId
+                try:
+                    process = psutil.Process(session.ProcessId)
+                    process_name = os.path.basename(process.exe())
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+
+                # Get the simple audio volume of the session
+                volume = session.SimpleAudioVolume
+
+
+                # Skip muting Chrome windows
+                if process_name in exceptions_list:
+                    if volume is not None:
+                        audio_meter = session._ctl.QueryInterface(IAudioMeterInformation)
+                        peak_value = audio_meter.GetPeakValue()
+                        if peak_value > 0:
+                            non_zero_other = True
+
+
         for session in sessions:
             if session.Process:            
                 process_id = session.ProcessId
@@ -79,19 +115,33 @@ def mute_unmute_apps():
                 if process_name in exceptions_list:
                     continue
 
-
                 if volume is not None:
+                    # current_volume = volume.GetMasterVolume()
+
+                    # Query the IAudioMeterInformation interface
+                    audio_meter = session._ctl.QueryInterface(IAudioMeterInformation)
+                    peak_value = audio_meter.GetPeakValue()
+
                     # Check if the process ID is the foreground process
                     if is_foreground_process(process_id):
+                        last_foreground_app_pid = process_id
                         # Unmute the audio if it's in the foreground
                         if volume.GetMute() == 1:
                             volume.SetMute(0, None)
-                            print(f"Unmuted({process_id}): {process_name} [{process_name}]")
+                            print(f"Unmuted({process_id}): {process_name} [{process_name}] PeakValue: {peak_value}")
                     else:
+                        if skip_mute_last_app.get() and process_id == last_foreground_app_pid:
+                            if non_zero_other is False:
+                                if restore_unmuted.get() == 1:
+                                    volume.SetMute(0, None)
+                                # Skip muting the last foreground app
+                                continue
+
+
                         # Mute the audio if it's not the foreground
                         if volume.GetMute() == 0:
                             volume.SetMute(1, None)
-                            print(f"Muted({process_id}): {process_name} [{process_name}]")
+                            print(f"Muted({process_id}): {process_name} [{process_name}] PeakValue: {peak_value}")
 
         to_unmute.clear()
         root.after(100, mute_unmute_apps)
@@ -137,11 +187,14 @@ def remove_exception():
 
 # Load the exceptions when the application starts
 if not load_exceptions():
-    exceptions_list = ["chrome.exe"]
+    exceptions_list = DEFAULT_EXCEPTION_LIST
 
 # Create the main window
 root = Tk()
 root.title("App Muter")
+
+
+skip_mute_last_app = IntVar(value=1)
 
 # Create the listboxes and labels
 label_exceptions = Label(root, text="Exceptions (Not Muted)")
@@ -160,6 +213,17 @@ btn_add.pack()
 
 btn_remove = Button(root, text="Remove from Exceptions", command=remove_exception)
 btn_remove.pack()
+
+
+# Checkbox for muting the last opened app
+skip_mute_last_app = IntVar(value=1)
+cb_skip_mute_last_app = Checkbutton(root, text="Don't Mute Last Opened App", variable=skip_mute_last_app)
+cb_skip_mute_last_app.pack()
+
+restore_unmuted = IntVar(value=0)
+cb_restore_unmuted = Checkbutton(root, text="Restore unmuted", variable=restore_unmuted)
+cb_restore_unmuted.pack()
+
 
 
 # Schedule the first update of the lists

@@ -1,3 +1,4 @@
 pywin32
 pycaw
 psutil
+comtypes
