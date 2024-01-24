@@ -107,7 +107,7 @@ def mute_unmute_apps():
                 volume = session.SimpleAudioVolume
 
                 # Unmute items removed from exceptions
-                if process_name in to_unmute:
+                if process_name in to_unmute and volume.GetMute() == 1:
                     print(f"Unmuted({process_id}): {process_name} [{process_name}]")
                     volume.SetMute(0, None)
 
@@ -123,7 +123,7 @@ def mute_unmute_apps():
                     peak_value = audio_meter.GetPeakValue()
 
                     # Check if the process ID is the foreground process
-                    if is_foreground_process(process_id):
+                    if is_foreground_process(process_id) and force_mute.get() == 0:
                         last_foreground_app_pid = process_id
                         # Unmute the audio if it's in the foreground
                         if volume.GetMute() == 1:
@@ -132,8 +132,9 @@ def mute_unmute_apps():
                     else:
                         if skip_mute_last_app.get() and process_id == last_foreground_app_pid:
                             if non_zero_other is False:
-                                if restore_unmuted.get() == 1:
+                                if restore_unmuted.get() == 1 and volume.GetMute() == 1:
                                     volume.SetMute(0, None)
+                                    print(f"Muted(coliding sound)({process_id}): {process_name} [{process_name}] PeakValue: {peak_value}")
                                 # Skip muting the last foreground app
                                 continue
 
@@ -142,6 +143,8 @@ def mute_unmute_apps():
                         if volume.GetMute() == 0:
                             volume.SetMute(1, None)
                             print(f"Muted({process_id}): {process_name} [{process_name}] PeakValue: {peak_value}")
+
+
 
         to_unmute.clear()
         root.after(100, mute_unmute_apps)
@@ -224,7 +227,9 @@ restore_unmuted = IntVar(value=0)
 cb_restore_unmuted = Checkbutton(root, text="Restore unmuted", variable=restore_unmuted)
 cb_restore_unmuted.pack()
 
-
+force_mute = IntVar(value=0)
+cb_force_mute = Checkbutton(root, text="Force mute", variable=force_mute)
+cb_force_mute.pack()
 
 # Schedule the first update of the lists
 root.after(100, update_lists)
