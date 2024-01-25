@@ -4,6 +4,7 @@ import psutil
 import os
 import win32gui
 import win32process
+import winreg
 from tkinter import Checkbutton, IntVar
 
 from comtypes import CLSCTX_ALL
@@ -217,19 +218,70 @@ btn_add.pack()
 btn_remove = Button(root, text="Remove from Exceptions", command=remove_exception)
 btn_remove.pack()
 
+def load_from_winreg():
+	try:
+		# Load dictionary back from registry    
+		loaded_dict = {}
+		key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\AppMuter")
+		for i in range(winreg.QueryInfoKey(key)[1]):
+		    value_name = winreg.EnumValue(key, i)[0]
+		    value = winreg.EnumValue(key, i)[1]
+		    loaded_dict[value_name] = value
+		return loaded_dict
+	except Exception as e:
+		print(e)
+		return {}
+
+def save_to_winreg(dict_to_save):
+	# Save dictionary to registry
+	key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\AppMuter")
+	for key_name, value in dict_to_save.items():
+	    winreg.SetValueEx(key, key_name, 0, winreg.REG_DWORD, value)
+
+
+
+params = load_from_winreg() or {}
+print(params)
 
 # Checkbox for muting the last opened app
-skip_mute_last_app = IntVar(value=1)
+skip_mute_last_app = IntVar(value=params.get("skip_mute_last_app") or 1)
 cb_skip_mute_last_app = Checkbutton(root, text="Don't Mute Last Opened App", variable=skip_mute_last_app)
 cb_skip_mute_last_app.pack()
 
-restore_unmuted = IntVar(value=0)
+restore_unmuted = IntVar(value=params.get("restore_unmuted") or 0)
 cb_restore_unmuted = Checkbutton(root, text="Restore unmuted", variable=restore_unmuted)
 cb_restore_unmuted.pack()
 
-force_mute = IntVar(value=0)
+force_mute = IntVar(value=params.get("force_mute") or 0)
 cb_force_mute = Checkbutton(root, text="Force mute", variable=force_mute)
 cb_force_mute.pack()
+
+
+params = {
+	"skip_mute_last_app": skip_mute_last_app.get(),
+	"restore_unmuted": restore_unmuted.get(),
+	"force_mute": force_mute.get(),
+}
+
+
+
+
+
+save_to_winreg(params)
+
+
+def update_params():
+  params = {
+    "skip_mute_last_app": skip_mute_last_app.get(),
+    "restore_unmuted": restore_unmuted.get(),
+    "force_mute": force_mute.get()
+  }
+  print("writing params", params)
+  save_to_winreg(params)
+
+skip_mute_last_app.trace("w", lambda *args: update_params())
+restore_unmuted.trace("w", lambda *args: update_params())
+force_mute.trace("w", lambda *args: update_params())
 
 # Schedule the first update of the lists
 root.after(100, update_lists)
