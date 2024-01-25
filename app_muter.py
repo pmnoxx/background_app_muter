@@ -5,7 +5,7 @@ import os
 import win32gui
 import win32process
 import winreg
-from tkinter import Checkbutton, IntVar
+from tkinter import Checkbutton, IntVar, StringVar, Entry, Scale
 
 from comtypes import CLSCTX_ALL
 import comtypes
@@ -123,6 +123,16 @@ def mute_unmute_apps():
                     audio_meter = session._ctl.QueryInterface(IAudioMeterInformation)
                     peak_value = audio_meter.GetPeakValue()
 
+
+                    current_volume = volume.GetMasterVolume()
+                    volume_value = int(volume_var.get()) / 100
+
+                    if current_volume is None or current_volume != volume_value: 
+                        volume.SetMasterVolume(volume_value, None)
+
+                    current_volume = volume.GetMasterVolume()
+
+
                     # Check if the process ID is the foreground process
                     if is_foreground_process(process_id) and force_mute.get() == 0:
                         last_foreground_app_pid = process_id
@@ -138,6 +148,8 @@ def mute_unmute_apps():
                                     print(f"Muted(coliding sound)({process_id}): {process_name} [{process_name}] PeakValue: {peak_value}")
                                 # Skip muting the last foreground app
                                 continue
+                            else:                                    
+                            	volume.SetMute(1, None)
 
 
                         # Mute the audio if it's not the foreground
@@ -257,24 +269,21 @@ cb_force_mute = Checkbutton(root, text="Force mute", variable=force_mute)
 cb_force_mute.pack()
 
 
-params = {
-	"skip_mute_last_app": skip_mute_last_app.get(),
-	"restore_unmuted": restore_unmuted.get(),
-	"force_mute": force_mute.get(),
-}
+volume_var = StringVar(value=str(params.get("volume")) if params.get("volume") is not None else '100')
 
 
+volume_scale = Scale(root, from_=0, to=100, orient='horizontal', variable=volume_var)
+# volume_scale.set(100)
+volume_scale.pack()
 
-
-
-save_to_winreg(params)
 
 
 def update_params():
   params = {
     "skip_mute_last_app": skip_mute_last_app.get(),
     "restore_unmuted": restore_unmuted.get(),
-    "force_mute": force_mute.get()
+    "force_mute": force_mute.get(),
+    "volume": int(volume_var.get()),
   }
   print("writing params", params)
   save_to_winreg(params)
@@ -282,6 +291,7 @@ def update_params():
 skip_mute_last_app.trace("w", lambda *args: update_params())
 restore_unmuted.trace("w", lambda *args: update_params())
 force_mute.trace("w", lambda *args: update_params())
+volume_var.trace("w", lambda *args: update_params())
 
 # Schedule the first update of the lists
 root.after(100, update_lists)
