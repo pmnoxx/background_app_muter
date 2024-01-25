@@ -269,7 +269,7 @@ cb_force_mute = Checkbutton(root, text="Force mute", variable=force_mute)
 cb_force_mute.pack()
 
 
-volume_var = StringVar(value=str(params.get("volume")) if params.get("volume") is not None else '100')
+volume_var = IntVar(value=int(params.get("volume")) if params.get("volume") is not None else 100)
 
 
 volume_scale = Scale(root, from_=0, to=100, orient='horizontal', variable=volume_var)
