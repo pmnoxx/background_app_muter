@@ -66,9 +66,12 @@ def update_lists():
     # Schedule the next update
     root.after(100, update_lists)
 
+zero_cnt = 0
+
+
 # Function to mute/unmute applications
 def mute_unmute_apps():
-        global last_foreground_app_pid, skip_mute_last_app
+        global last_foreground_app_pid, skip_mute_last_app, zero_cnt
         # Get the list of all the current sessions
         sessions = AudioUtilities.GetAllSessions()
 
@@ -93,6 +96,11 @@ def mute_unmute_apps():
                         peak_value = audio_meter.GetPeakValue()
                         if peak_value > 0:
                             non_zero_other = True
+            
+        if non_zero_other:            
+            zero_cnt = zero_cnt + 1
+        else:
+            zero_cnt = 0
 
 
         for session in sessions:
@@ -131,31 +139,29 @@ def mute_unmute_apps():
                         volume.SetMasterVolume(volume_value, None)
 
                     current_volume = volume.GetMasterVolume()
+                    should_be_muted = False
 
 
                     # Check if the process ID is the foreground process
-                    if is_foreground_process(process_id) and force_mute.get() == 0:
+                    if force_mute.get() == 1 or (mute_forground_when_background.get() == 1 and zero_cnt >= 10):
+                        should_be_muted = True
+                    elif is_foreground_process(process_id):
                         last_foreground_app_pid = process_id
                         # Unmute the audio if it's in the foreground
-                        if volume.GetMute() == 1:
-                            volume.SetMute(0, None)
-                            print(f"Unmuted({process_id}): {process_name} [{process_name}] PeakValue: {peak_value}")
+
+                        should_be_muted = False
                     else:
+                        should_be_muted = True
                         if skip_mute_last_app.get() and process_id == last_foreground_app_pid:
                             if non_zero_other is False:
-                                if restore_unmuted.get() == 1 and volume.GetMute() == 1:
-                                    volume.SetMute(0, None)
-                                    print(f"Muted(coliding sound)({process_id}): {process_name} [{process_name}] PeakValue: {peak_value}")
-                                # Skip muting the last foreground app
-                                continue
-                            else:                                    
-                            	volume.SetMute(1, None)
+                                should_be_muted = False
 
-
-                        # Mute the audio if it's not the foreground
-                        if volume.GetMute() == 0:
-                            volume.SetMute(1, None)
-                            print(f"Muted({process_id}): {process_name} [{process_name}] PeakValue: {peak_value}")
+                    if volume.GetMute() == 0 and should_be_muted:
+                         volume.SetMute(1, None)
+                         print(f"Muted({process_id}): {process_name} [{process_name}] PeakValue: {peak_value}")
+                    elif volume.GetMute() == 1 and not should_be_muted:
+                        volume.SetMute(0, None)
+                        print(f"Unmuted({process_id}): {process_name} [{process_name}] PeakValue: {peak_value}")
 
 
 
@@ -260,13 +266,15 @@ skip_mute_last_app = IntVar(value=params.get("skip_mute_last_app") or 1)
 cb_skip_mute_last_app = Checkbutton(root, text="Don't Mute Last Opened App", variable=skip_mute_last_app)
 cb_skip_mute_last_app.pack()
 
-restore_unmuted = IntVar(value=params.get("restore_unmuted") or 0)
-cb_restore_unmuted = Checkbutton(root, text="Restore unmuted", variable=restore_unmuted)
-cb_restore_unmuted.pack()
 
 force_mute = IntVar(value=params.get("force_mute") or 0)
 cb_force_mute = Checkbutton(root, text="Force mute", variable=force_mute)
 cb_force_mute.pack()
+
+mute_forground_when_background = IntVar(value=params.get("mute_forground_when_background") or 0)
+cb_mute_forground_when_background = Checkbutton(root, text="Mute forground when background is playing", variable=mute_forground_when_background)
+cb_mute_forground_when_background.pack()
+
 
 
 volume_var = IntVar(value=int(params.get("volume")) if params.get("volume") is not None else 100)
@@ -281,17 +289,17 @@ volume_scale.pack()
 def update_params():
   params = {
     "skip_mute_last_app": skip_mute_last_app.get(),
-    "restore_unmuted": restore_unmuted.get(),
     "force_mute": force_mute.get(),
     "volume": int(volume_var.get()),
+   "mute_forground_when_background": mute_forground_when_background.get(),
   }
   print("writing params", params)
   save_to_winreg(params)
 
 skip_mute_last_app.trace("w", lambda *args: update_params())
-restore_unmuted.trace("w", lambda *args: update_params())
 force_mute.trace("w", lambda *args: update_params())
 volume_var.trace("w", lambda *args: update_params())
+mute_forground_when_background.trace("w", lambda *args: update_params())
 
 # Schedule the first update of the lists
 root.after(100, update_lists)
