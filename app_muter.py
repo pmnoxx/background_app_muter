@@ -1,11 +1,15 @@
-from tkinter import Tk, Listbox, Button, Label, END
-from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
+
 import psutil
 import os
 import win32gui
 import win32process
 import winreg
 import keyboard
+import sys
+import pyuac
+
+from tkinter import Tk, Listbox, Button, Label, END
+from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
 from tkinter import Checkbutton, IntVar, StringVar, Entry, Scale
 
 from comtypes import CLSCTX_ALL
@@ -21,6 +25,7 @@ to_unmute = []
 last_foreground_app_pid = None
 
 pressed_keys = set()
+
 
 
 def on_press(key):
@@ -239,6 +244,30 @@ def remove_exception():
 # Load the exceptions when the application starts
 if not load_exceptions():
     exceptions_list = DEFAULT_EXCEPTION_LIST
+
+
+
+def is_admin():
+    """Check if the current process is running with administrative privileges"""
+    try:
+        return pyuac.isUserAdmin()
+    except:
+        return False
+
+def run_as_admin():
+    """Run the current script with administrative privileges"""
+    if not is_admin():
+        print("This script requires administrative privileges to run.")
+        try:
+            pyuac.runAsAdmin()
+        except:
+            pass
+    else:
+        # Your code here
+        print("Running with administrative privileges.")
+
+if __name__ == "__main__":
+    run_as_admin()
 
 # Create the main window
 root = Tk()
