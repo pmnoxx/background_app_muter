@@ -3,3 +3,4 @@ pycaw
 psutil
 comtypes
 keyboard
+pyuac

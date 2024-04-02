@@ -1,16 +1,14 @@
-
 import psutil
 import os
 import win32gui
 import win32process
 import winreg
 import keyboard
-import sys
 import pyuac
 
 from tkinter import Tk, Listbox, Button, Label, END
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
-from tkinter import Checkbutton, IntVar, StringVar, Entry, Scale
+from tkinter import Checkbutton, IntVar, Scale
 
 from comtypes import CLSCTX_ALL
 import comtypes
