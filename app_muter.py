@@ -21,17 +21,25 @@ last_foreground_app_pid = None
 
 pressed_keys = set()
 
-
-
-def on_press(key):
+def on_press(key: keyboard.KeyboardEvent):
     global pressed_keys
-    if keyboard.is_pressed("f5") and keyboard.is_pressed('windows'):
-        pressed_keys.add("f5")
-    if keyboard.is_pressed("f6") and keyboard.is_pressed('windows'):
-        pressed_keys.add("f6")
-    if keyboard.is_pressed("f7") and keyboard.is_pressed('windows'):
-        pressed_keys.add("f7")
+    # print(f"pressed key {key.name} {key.modifiers}")
 
+    if keyboard.is_pressed("f5") and keyboard.is_pressed('windows'):
+        if "f5" not in pressed_keys:
+            pressed_keys.add("f5")
+        else:
+            pressed_keys.remove("f5")
+    if keyboard.is_pressed("f6") and keyboard.is_pressed('windows'):
+        if "f6" not in pressed_keys:
+            pressed_keys.add("f6")
+        else:
+            pressed_keys.remove("f6")
+    if keyboard.is_pressed("f7") and keyboard.is_pressed('windows'):
+        if "f7" not in pressed_keys:
+            pressed_keys.add("f7")
+        else:
+            pressed_keys.remove("f7")
 
 keyboard.on_press(on_press)
 
@@ -50,6 +58,7 @@ def is_foreground_process(pid):
 # Function to update the lists in the GUI
 def update_lists():
     if pressed_keys:
+        # this will not work correctly if keys are pressed a few times in 100ms
         if "f5" in pressed_keys:
             force_mute_fg_var.set(1 - force_mute_fg_var.get())
             print("pressed f5")
