@@ -10,9 +10,6 @@ from tkinter import Tk, Listbox, Button, Label, END
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
 from tkinter import Checkbutton, IntVar, Scale
 
-from comtypes import CLSCTX_ALL
-import comtypes
-
 DEFAULT_EXCEPTION_LIST = ["chrome.exe", "firefox.exe", "msedge.exe"]
 
 # List to hold the names of processes that should not be muted
