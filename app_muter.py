@@ -21,6 +21,7 @@ last_foreground_app_pid = None
 
 pressed_keys = set()
 
+
 def on_press(key: keyboard.KeyboardEvent):
     global pressed_keys
     # print(f"pressed key {key.name} {key.modifiers}")
@@ -250,13 +251,13 @@ if not load_exceptions():
     exceptions_list = DEFAULT_EXCEPTION_LIST
 
 
-
 def is_admin():
     """Check if the current process is running with administrative privileges"""
     try:
         return pyuac.isUserAdmin()
     except:
         return False
+
 
 def run_as_admin():
     """Run the current script with administrative privileges"""
@@ -269,6 +270,7 @@ def run_as_admin():
     else:
         # Your code here
         print("Running with administrative privileges.")
+
 
 if __name__ == "__main__":
     run_as_admin()
@@ -361,7 +363,6 @@ def update_params():
         "volume": int(volume_var.get()),
         "background_volume": int(background_volume_var.get()),
         "mute_forground_when_background": mute_forground_when_background.get(),
-        "background_volume": int(background_volume_var.get()),
     }
     print("writing params", params)
     save_to_winreg(params)
