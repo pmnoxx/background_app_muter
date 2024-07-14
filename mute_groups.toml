@@ -1,0 +1,4 @@
+# mute_groups.toml
+MUTE_GROUPS = [
+    ["steam.exe", "steamwebhelper.exe"]
+]

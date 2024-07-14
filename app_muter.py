@@ -1,5 +1,7 @@
+
 import psutil
 import os
+
 import win32gui
 import win32process
 import winreg
@@ -7,6 +9,7 @@ import keyboard
 import pyuac
 
 from tkinter import Tk, Listbox, Button, Label, END
+
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
 from tkinter import Checkbutton, IntVar, Scale
 
@@ -21,8 +24,24 @@ last_foreground_app_pid = None
 
 pressed_keys = set()
 
+def read_mute_groups(filename):
+    try:
+        with open(filename, "r") as toml_file:
+            data = toml.load(toml_file)
+            return data.get("MUTE_GROUPS", [])
+    except FileNotFoundError:
+        print(f"File '{filename}' not found.")
+        return []
 
-def on_press(key: keyboard.KeyboardEvent):
+
+MUTE_GROUPS = read_mute_groups("mute_groups.toml")
+
+def on_release(key):
+    print(f"Released {key.name}")
+
+
+def on_key_event(key: keyboard.KeyboardEvent):
+    # print(f"pressed {key} at {time.time()}")
     global pressed_keys
     # print(f"pressed key {key.name} {key.modifiers}")
 
@@ -42,8 +61,8 @@ def on_press(key: keyboard.KeyboardEvent):
         else:
             pressed_keys.remove("f7")
 
-keyboard.on_press(on_press)
 
+keyboard.hook(on_key_event)
 
 # Function to check if a specific process ID is the foreground window
 def is_foreground_process(pid):
@@ -51,6 +70,19 @@ def is_foreground_process(pid):
     foreground_window = win32gui.GetForegroundWindow()
     # Get the process id of the foreground window
     _, foreground_pid = win32process.GetWindowThreadProcessId(foreground_window)
+
+    fg_process = psutil.Process(foreground_pid)
+    fg_process_exe_name = os.path.basename(fg_process.exe())
+
+    bg_process = psutil.Process(pid)
+    bg_process_exe_name = os.path.basename(bg_process.exe())
+
+    for proc_group in MUTE_GROUPS:
+        if fg_process_exe_name in proc_group and bg_process_exe_name in proc_group:
+            return True
+
+    # xxx
+
 
     # Check if the process ID matches and return accordingly
     return pid == foreground_pid
@@ -179,7 +211,7 @@ def mute_unmute_apps():
                 volume.SetMasterVolume(volume_value, None)
 
             # Check if the process ID is the foreground process
-            if force_mute_fg_var.get() == 1 or (mute_forground_when_background.get() == 1 and zero_cnt <= 30):
+            if force_mute_fg_var.get() == 1 or (mute_foreground_when_background.get() == 1 and zero_cnt <= 30):
                 should_be_muted = True
             elif is_foreground_process(process_id):
                 last_foreground_app_pid = process_id
@@ -275,6 +307,12 @@ def run_as_admin():
 if __name__ == "__main__":
     run_as_admin()
 
+
+APP_GROUPS = [
+    ["steam.exe", "steamwebhelper.exe"]
+
+]
+
 # Create the main window
 root = Tk()
 root.title("App Muter")
@@ -338,9 +376,9 @@ force_mute_bg_var = IntVar(value=params.get("force_mute_bg") or 0)
 cb_force_mute_bg = Checkbutton(root, text="Force mute bg", variable=force_mute_bg_var)
 cb_force_mute_bg.pack()
 
-mute_forground_when_background = IntVar(value=params.get("mute_forground_when_background") or 0)
-cb_mute_forground_when_background = Checkbutton(root, text="Mute forground when background is playing",
-                                                variable=mute_forground_when_background)
+mute_foreground_when_background = IntVar(value=params.get("mute_foreground_when_background") or 0)
+cb_mute_forground_when_background = Checkbutton(root, text="Mute foreground when background is playing",
+                                                variable=mute_foreground_when_background)
 cb_mute_forground_when_background.pack()
 
 background_volume_var = IntVar(
@@ -362,7 +400,7 @@ def update_params():
         "force_mute_bg": force_mute_bg_var.get(),
         "volume": int(volume_var.get()),
         "background_volume": int(background_volume_var.get()),
-        "mute_forground_when_background": mute_forground_when_background.get(),
+        "mute_forgeround_when_background": mute_foreground_when_background.get(),
     }
     print("writing params", params)
     save_to_winreg(params)
@@ -372,7 +410,7 @@ skip_mute_last_app.trace("w", lambda *args: update_params())
 force_mute_fg_var.trace("w", lambda *args: update_params())
 force_mute_bg_var.trace("w", lambda *args: update_params())
 volume_var.trace("w", lambda *args: update_params())
-mute_forground_when_background.trace("w", lambda *args: update_params())
+mute_foreground_when_background.trace("w", lambda *args: update_params())
 
 # Schedule the first update of the lists
 root.after(100, update_lists)
