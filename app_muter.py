@@ -12,6 +12,7 @@ from tkinter import Tk, Listbox, Button, Label, END
 
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
 from tkinter import Checkbutton, IntVar, Scale
+import toml
 
 DEFAULT_EXCEPTION_LIST = ["chrome.exe", "firefox.exe", "msedge.exe"]
 
