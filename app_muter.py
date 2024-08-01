@@ -1,3 +1,4 @@
+import sys
 
 import psutil
 import os
@@ -25,9 +26,13 @@ last_foreground_app_pid = None
 
 pressed_keys = set()
 
+
 def read_mute_groups(filename):
     try:
-        with open(filename, "r") as toml_file:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        full_path = os.path.join(script_dir, filename)
+
+        with open(full_path, "r") as toml_file:
             data = toml.load(toml_file)
             return data.get("MUTE_GROUPS", [])
     except FileNotFoundError:
@@ -36,6 +41,7 @@ def read_mute_groups(filename):
 
 
 MUTE_GROUPS = read_mute_groups("mute_groups.toml")
+
 
 def on_release(key):
     print(f"Released {key.name}")
@@ -67,26 +73,32 @@ keyboard.hook(on_key_event)
 
 # Function to check if a specific process ID is the foreground window
 def is_foreground_process(pid):
-    # Get the handle to the foreground window
-    foreground_window = win32gui.GetForegroundWindow()
-    # Get the process id of the foreground window
-    _, foreground_pid = win32process.GetWindowThreadProcessId(foreground_window)
+    if pid <= 0:
+        return []
+    try:
+        # Get the handle to the foreground window
+        foreground_window = win32gui.GetForegroundWindow()
+        # Get the process id of the foreground window
+        _, foreground_pid = win32process.GetWindowThreadProcessId(foreground_window)
 
-    fg_process = psutil.Process(foreground_pid)
-    fg_process_exe_name = os.path.basename(fg_process.exe())
+        if foreground_pid <= 0:
+            return []
 
-    bg_process = psutil.Process(pid)
-    bg_process_exe_name = os.path.basename(bg_process.exe())
+        fg_process = psutil.Process(foreground_pid)
+        fg_process_exe_name = os.path.basename(fg_process.exe())
 
-    for proc_group in MUTE_GROUPS:
-        if fg_process_exe_name in proc_group and bg_process_exe_name in proc_group:
-            return True
+        bg_process = psutil.Process(pid)
+        bg_process_exe_name = os.path.basename(bg_process.exe())
 
-    # xxx
-
+        if fg_process_exe_name != bg_process_exe_name:
+            for proc_group in MUTE_GROUPS:
+                if fg_process_exe_name in proc_group and bg_process_exe_name in proc_group:
+                    return True
+        return pid == foreground_pid
+    except psutil.NoSuchProcess:
+        return False
 
     # Check if the process ID matches and return accordingly
-    return pid == foreground_pid
 
 
 # Function to update the lists in the GUI
@@ -198,7 +210,7 @@ def mute_unmute_apps():
 
         # Skip muting Chrome windows
         if process_name in exceptions_list:
-            background_volume_value = int(background_volume_var.get()) / 100
+            background_volume_value = float(background_volume_var.get()) / 100
 
             if current_volume is None or abs(current_volume - background_volume_value) > 0.001:
                 volume.SetMasterVolume(background_volume_value, None)
@@ -206,7 +218,7 @@ def mute_unmute_apps():
             if force_mute_bg_var.get() == 1:
                 should_be_muted = True
         else:
-            volume_value = int(volume_var.get()) / 100
+            volume_value = float(volume_var.get()) / 100
 
             if current_volume is None or abs(current_volume - volume_value) > 0.001:
                 volume.SetMasterVolume(volume_value, None)
@@ -297,9 +309,10 @@ def run_as_admin():
     if not is_admin():
         print("This script requires administrative privileges to run.")
         try:
-            pyuac.runAsAdmin()
+            pyuac.runAsAdmin(wait=False)
         except:
             pass
+        sys.exit(0)
     else:
         # Your code here
         print("Running with administrative privileges.")

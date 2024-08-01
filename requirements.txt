@@ -4,3 +4,4 @@ psutil
 comtypes
 keyboard
 pyuac
+toml
