@@ -7,7 +7,6 @@ import pyuac
 import toml
 import win32gui
 import win32process
-import traceback
 
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
 from tkinter import Tk, Listbox, Button, Label, END, Checkbutton, IntVar, Scale
@@ -285,39 +284,19 @@ def run_as_admin():
         # Your code here
         print("Running with administrative privileges.")
 
-def main():
-    try:
-        # run_as_admin()
+if __name__ == "__main__":
+    run_as_admin()
 
-        keyboard.hook(on_key_event)
-        APP_GROUPS = [
-            ["steam.exe", "steamwebhelper.exe"]
-        ]
+    keyboard.hook(on_key_event)
+    APP_GROUPS = [
+        ["steam.exe", "steamwebhelper.exe"]
+    ]
 
-        # Create the main window
-        root = Tk()
-        root.title("App Muter")
-        root.configure(bg='#2b2b2b')
+    # Create the main window
+    root = Tk()
+    root.title("App Muter")
+    root.configure(bg='#2b2b2b')  # Dark grey background
 
-        # Create UI elements
-        create_ui(root)
-
-        # Schedule updates
-        root.after(100, update_lists)
-        root.after(100, mute_unmute_apps)
-
-        # Start the GUI loop
-        root.mainloop()
-    except Exception as e:
-        print("\nAn error occurred:")
-        print(f"Error type: {type(e).__name__}")
-        print(f"Error message: {str(e)}")
-        print("\nStack trace:")
-        traceback.print_exc()
-        input("\nPress Enter to exit...")  # Keep window open to read error
-        sys.exit(1)
-
-def create_ui(root):
     # Create the listboxes and labels
     label_exceptions = Label(root, text="Exceptions (Not Muted)", bg='#2b2b2b', fg='white')
     label_exceptions.pack()
@@ -329,12 +308,7 @@ def create_ui(root):
     lb_non_exceptions = Listbox(root, bg='#3c3f41', fg='white', selectbackground='#4b6eaf')
     lb_non_exceptions.pack()
 
-    # Create buttons and other UI elements
-    create_buttons(root)
-    create_checkboxes(root)
-    create_volume_controls(root)
-
-def create_buttons(root):
+    # Create the add and remove buttons
     btn_add = Button(root, text="Add to Exceptions", 
                     command=lambda: app_state.add_exception(lb_non_exceptions.get(lb_non_exceptions.curselection())),
                     bg='#3c3f41', fg='white', activebackground='#4b6eaf')
@@ -345,9 +319,29 @@ def create_buttons(root):
                        bg='#3c3f41', fg='white', activebackground='#4b6eaf')
     btn_remove.pack()
 
-def create_checkboxes(root):
+    def load_from_winreg():
+        try:
+            # Load dictionary back from registry
+            loaded_dict = {}
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\AppMuter")
+            for i in range(winreg.QueryInfoKey(key)[1]):
+                value_name = winreg.EnumValue(key, i)[0]
+                value = winreg.EnumValue(key, i)[1]
+                loaded_dict[value_name] = value
+            return loaded_dict
+        except Exception as e:
+            print(e)
+            return {}
+
+    def save_to_winreg(dict_to_save):
+        # Save dictionary to registry
+        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\AppMuter")
+        for key_name, value in dict_to_save.items():
+            winreg.SetValueEx(key, key_name, 0, winreg.REG_DWORD, value)
+
     params = load_from_winreg() or {}
-    
+    print(params)
+
     # Checkbox for muting the last opened app
     mute_last_app = IntVar(value=params.get("mute_last_app") or 0)
     cb_mute_last_app = Checkbutton(root, text="Mute Last Opened App", variable=mute_last_app,
@@ -375,17 +369,9 @@ def create_checkboxes(root):
                                                    bg='#2b2b2b', fg='white', selectcolor='#3c3f41', activebackground='#2b2b2b')
     cb_mute_forground_when_background.pack()
 
-def create_volume_controls(root):
-    params = load_from_winreg() or {}
-    
-    # Background volume control group
     background_volume_var = IntVar(
         value=int(params.get("background_volume")) if params.get("background_volume") is not None else 100)
-    
-    background_volume_label = Label(root, text="Background Apps Volume:", 
-                                  bg='#2b2b2b', fg='white')
-    background_volume_label.pack()
-    
+
     background_volume_scale = Scale(root, from_=0, to=100, orient='horizontal', 
                                   variable=background_volume_var,
                                   bg='#2b2b2b', fg='white', 
@@ -393,13 +379,8 @@ def create_volume_controls(root):
                                   activebackground='#4b6eaf')
     background_volume_scale.pack()
 
-    # Foreground volume control group
     volume_var = IntVar(value=int(params.get("volume")) if params.get("volume") is not None else 100)
-    
-    volume_label = Label(root, text="Foreground Apps Volume:", 
-                        bg='#2b2b2b', fg='white')
-    volume_label.pack()
-    
+
     volume_scale = Scale(root, from_=0, to=100, orient='horizontal', 
                         variable=volume_var,
                         bg='#2b2b2b', fg='white', 
@@ -407,25 +388,28 @@ def create_volume_controls(root):
                         activebackground='#4b6eaf')
     volume_scale.pack()
 
-def load_from_winreg():
-    try:
-        # Load dictionary back from registry
-        loaded_dict = {}
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\AppMuter")
-        for i in range(winreg.QueryInfoKey(key)[1]):
-            value_name = winreg.EnumValue(key, i)[0]
-            value = winreg.EnumValue(key, i)[1]
-            loaded_dict[value_name] = value
-        return loaded_dict
-    except Exception as e:
-        print(e)
-        return {}
+    def update_params():
+        params = {
+            "mute_last_app": mute_last_app.get(),
+            "force_mute_fg": force_mute_fg_var.get(),
+            "force_mute_bg": force_mute_bg_var.get(),
+            "volume": int(volume_var.get()),
+            "background_volume": int(background_volume_var.get()),
+            "mute_forgeround_when_background": mute_foreground_when_background.get(),
+            "lock": 0, # int(lock_var.get()),
+        }
+        print("writing params", params)
+        save_to_winreg(params)
 
-def save_to_winreg(dict_to_save):
-    # Save dictionary to registry
-    key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\AppMuter")
-    for key_name, value in dict_to_save.items():
-        winreg.SetValueEx(key, key_name, 0, winreg.REG_DWORD, value)
+    mute_last_app.trace("w", lambda *args: update_params())
+    force_mute_fg_var.trace("w", lambda *args: update_params())
+    force_mute_bg_var.trace("w", lambda *args: update_params())
+    volume_var.trace("w", lambda *args: update_params())
+    mute_foreground_when_background.trace("w", lambda *args: update_params())
 
-if __name__ == "__main__":
-    main()
+    # Schedule the first update of the lists
+    root.after(100, update_lists)
+    root.after(100, mute_unmute_apps)
+
+    # Start the GUI loop
+    root.mainloop()
