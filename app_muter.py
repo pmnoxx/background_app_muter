@@ -148,7 +148,7 @@ class AppState:
                 # Store the last known normal geometry
                 if hasattr(self.root, 'last_normal_geometry'):
                     self.window_state['geometry'] = self.root.last_normal_geometry
-        else:
+            else:
                 self.window_state['maximized'] = False
                 self.window_state['geometry'] = self.root.geometry()
                 # Store current geometry for when window is unmaximized
@@ -380,7 +380,7 @@ def is_foreground_process(pid):
             
         # Check if app should match PID
         if bg_process_exe_name in app_state.pid_match_apps:
-        return pid == foreground_pid
+            return pid == foreground_pid
         return True  # Match by exe name only
 
     except psutil.NoSuchProcess:
@@ -541,7 +541,7 @@ def debug_mute_decision(process_name, process_id, should_be_muted, reason):
         try:
             fg_process = psutil.Process(foreground_pid)
             fg_process_name = os.path.basename(fg_process.exe())
-    except:
+        except:
             fg_process_name = "unknown"
             
         # Get background process info
