@@ -80,6 +80,9 @@ class AppState:
         # Load app-specific volumes
         self.app_volumes = self.config.get("APP_VOLUMES", {})
 
+        # Add pid_match_apps setting
+        self.pid_match_apps = self.config.get("PID_MATCH_APPS", [])
+
     def setup_main_window(self):
         """Initialize main window settings"""
         self.root.title("App Muter")
@@ -145,7 +148,7 @@ class AppState:
                 # Store the last known normal geometry
                 if hasattr(self.root, 'last_normal_geometry'):
                     self.window_state['geometry'] = self.root.last_normal_geometry
-            else:
+        else:
                 self.window_state['maximized'] = False
                 self.window_state['geometry'] = self.root.geometry()
                 # Store current geometry for when window is unmaximized
@@ -185,6 +188,16 @@ class AppState:
         """Get volume setting for specific app"""
         return self.app_volumes.get(app_name, 100)
 
+    def save_pid_match_app(self, app_name, should_match_pid):
+        """Save PID matching setting for specific app"""
+        if should_match_pid and app_name not in self.pid_match_apps:
+            self.pid_match_apps.append(app_name)
+        elif not should_match_pid and app_name in self.pid_match_apps:
+            self.pid_match_apps.remove(app_name)
+        
+        self.config["PID_MATCH_APPS"] = self.pid_match_apps
+        self.save_config()
+
 class VolumeControlWindow:
     def __init__(self, parent, app_state):
         self.window = Toplevel(parent)
@@ -210,7 +223,13 @@ class VolumeControlWindow:
         self.apps_frame.pack(fill='both', expand=True, padx=5, pady=5)
         
         self.volume_vars = {}
+        self.pid_match_vars = {}
+        self.mute_labels = {}
+        self.volume_labels = {}  # Add volume labels dictionary
         self.update_app_list()
+        
+        # Start periodic status updates
+        self.update_mute_status()
         
     def filter_apps(self, *args):
         search_text = self.search_var.get().lower()
@@ -236,11 +255,31 @@ class VolumeControlWindow:
                 frame = Frame(self.apps_frame, bg=app_state.theme['bg'])
                 frame.pack(fill='x', padx=5, pady=2)
                 
+                # App name label
                 Label(frame, text=app_name, 
                       bg=app_state.theme['bg'],
                       fg=app_state.theme['fg'],
                       width=20, anchor='w').pack(side='left')
                 
+                # Status frame to hold mute and volume labels
+                status_frame = Frame(frame, bg=app_state.theme['bg'])
+                status_frame.pack(side='left', padx=5)
+                
+                # Mute status label
+                mute_label = Label(status_frame, text="", width=8,
+                                 bg=app_state.theme['bg'],
+                                 fg=app_state.theme['fg'])
+                mute_label.pack(side='left')
+                self.mute_labels[app_name] = mute_label
+                
+                # Volume level label
+                volume_label = Label(status_frame, text="", width=6,
+                                   bg=app_state.theme['bg'],
+                                   fg=app_state.theme['fg'])
+                volume_label.pack(side='left')
+                self.volume_labels[app_name] = volume_label
+                
+                # Volume slider
                 volume_var = IntVar(value=app_state.get_app_volume(app_name))
                 self.volume_vars[app_name] = volume_var
                 
@@ -254,16 +293,70 @@ class VolumeControlWindow:
                             command=lambda v, a=app_name: self.on_volume_change(a, v))
                 scale.pack(side='left', fill='x', expand=True)
                 
+                # PID match checkbox
+                pid_match_var = IntVar(value=1 if app_name in app_state.pid_match_apps else 0)
+                self.pid_match_vars[app_name] = pid_match_var
+                
+                Checkbutton(frame, text="Match PID",
+                           variable=pid_match_var,
+                           bg=app_state.theme['bg'],
+                           fg=app_state.theme['fg'],
+                           selectcolor=app_state.theme['button'],
+                           activebackground=app_state.theme['bg'],
+                           command=lambda a=app_name: self.on_pid_match_change(a)).pack(side='left', padx=5)
+                
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
-    
+
     def on_volume_change(self, app_name, value):
         app_state.save_app_volume(app_name, int(float(value)))
+
+    def on_pid_match_change(self, app_name):
+        should_match_pid = bool(self.pid_match_vars[app_name].get())
+        app_state.save_pid_match_app(app_name, should_match_pid)
+
+    def update_mute_status(self):
+        """Update mute status and volume for all apps"""
+        sessions = AudioUtilities.GetAllSessions()
+        
+        for session in sessions:
+            if not session.Process:
+                continue
+                
+            try:
+                process = psutil.Process(session.ProcessId)
+                app_name = os.path.basename(process.exe())
+                
+                if app_name in self.mute_labels:
+                    volume = session.SimpleAudioVolume
+                    if volume:
+                        is_muted = volume.GetMute()
+                        current_volume = int(volume.GetMasterVolume() * 100)
+                        
+                        # Update mute status
+                        self.mute_labels[app_name].config(
+                            text="Muted" if is_muted else "Unmuted",
+                            fg="#ff6b6b" if is_muted else "#69db7c"
+                        )
+                        
+                        # Update volume label
+                        self.volume_labels[app_name].config(
+                            text=f"{current_volume}%",
+                            fg=app_state.theme['fg']
+                        )
+                    
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        
+        # Schedule next update
+        if not self.window.winfo_exists():
+            return
+        self.window.after(100, self.update_mute_status)
 
 # Function to check if a specific process ID is the foreground window
 def is_foreground_process(pid):
     if pid <= 0:
-        return []
+        return False
     try:
         # Get the handle to the foreground window
         foreground_window = win32gui.GetForegroundWindow()
@@ -271,7 +364,7 @@ def is_foreground_process(pid):
         _, foreground_pid = win32process.GetWindowThreadProcessId(foreground_window)
 
         if foreground_pid <= 0:
-            return []
+            return False
 
         fg_process = psutil.Process(foreground_pid)
         fg_process_exe_name = os.path.basename(fg_process.exe())
@@ -282,8 +375,14 @@ def is_foreground_process(pid):
         if fg_process_exe_name != bg_process_exe_name:
             # Check if both processes are in the mute group
             if fg_process_exe_name in app_state.MUTE_GROUPS and bg_process_exe_name in app_state.MUTE_GROUPS:
-                return True
+                    return True
+            return False
+            
+        # Check if app should match PID
+        if bg_process_exe_name in app_state.pid_match_apps:
         return pid == foreground_pid
+        return True  # Match by exe name only
+
     except psutil.NoSuchProcess:
         return False
 
@@ -334,6 +433,7 @@ def mute_unmute_apps():
     sessions = AudioUtilities.GetAllSessions()
 
     non_zero_other = False
+    peak_value = 0
     for session in sessions:
         if session.Process:
             process_id = session.ProcessId
@@ -374,56 +474,94 @@ def mute_unmute_apps():
         if volume is None:
             continue
 
-        # Unmute items removed from exceptions
-        if process_name in app_state.to_unmute and volume.GetMute() == 1:
-            print(f"Unmuted({process_id}): {process_name} [{process_name}]")
-            volume.SetMute(0, None)
-
-        # Query the IAudioMeterInformation interface
-        audio_meter = session._ctl.QueryInterface(IAudioMeterInformation)
-        peak_value = audio_meter.GetPeakValue()
-        current_volume = volume.GetMasterVolume()
+        # Initialize mute status and reason
         should_be_muted = False
+        mute_reason = "Unknown"
 
         # Skip muting Chrome windows
         if process_name in app_state.exceptions_list:
             volume_value = float(app_state.get_app_volume(process_name)) / 100
 
-            if current_volume is None or abs(current_volume - volume_value) > 0.001:
+            if volume.GetMute() == 0 and abs(volume.GetMasterVolume() - volume_value) > 0.001:
                 volume.SetMasterVolume(volume_value, None)
 
             if app_state.force_mute_bg_var.get() == 1:
                 should_be_muted = True
+                mute_reason = "Force Mute Background"
         else:
             volume_value = float(app_state.get_app_volume(process_name)) / 100
 
-            if current_volume is None or abs(current_volume - volume_value) > 0.001:
+            if volume.GetMute() == 0 and abs(volume.GetMasterVolume() - volume_value) > 0.001:
                 volume.SetMasterVolume(volume_value, None)
 
             # Check if the process ID is the foreground process
-            if app_state.force_mute_fg_var.get() == 1 or (app_state.mute_foreground_when_background.get() == 1 and app_state.zero_cnt <= 30):
+            if app_state.force_mute_fg_var.get() == 1:
                 should_be_muted = True
+                mute_reason = "Force Mute Foreground"
+            elif app_state.mute_foreground_when_background.get() == 1 and app_state.zero_cnt <= 30:
+                should_be_muted = True
+                mute_reason = "Background Audio Playing"
             elif is_foreground_process(process_id):
                 app_state.last_foreground_app_pid = process_id
                 # Unmute the audio if it's in the foreground
-
                 should_be_muted = False
+                mute_reason = "Foreground App"
             else:
                 should_be_muted = True
-                if not app_state.mute_last_app.get() and process_id == app_state.last_foreground_app_pid:
+                mute_reason = f"Not Foreground App {process_id} {is_foreground_process(process_id)}"
+                if  app_state.mute_last_app.get() and process_id == app_state.last_foreground_app_pid:
                     if not non_zero_other:
                         should_be_muted = False
+                        mute_reason = "Last Active App"
+
+        #if process_name == "chrome.exe":
+        #    debug_mute_decision(process_name, process_id, should_be_muted, mute_reason)
 
         if volume.GetMute() == 0 and should_be_muted:
             volume.SetMute(1, None)
-            print(f"Muted({process_id}): {process_name} [{process_name}] PeakValue: {peak_value}")
+            reason = mute_reason  # Use tracked reason
+            print(f"Muted({process_id}): {process_name} [{process_name}] PeakValue: {peak_value} - Reason: {reason}")
         elif volume.GetMute() == 1 and not should_be_muted:
             volume.SetMute(0, None)
-            print(f"Unmuted({process_id}): {process_name} [{process_name}] PeakValue: {peak_value}")
+            reason = mute_reason  # Use tracked reason
+            print(f"Unmuted({process_id}): {process_name} [{process_name}] PeakValue: {peak_value} - Reason: {reason}")
 
     app_state.to_unmute.clear()
     app_state.root.after(100, mute_unmute_apps)
 
+# Add this debug function at the top level
+def debug_mute_decision(process_name, process_id, should_be_muted, reason):
+    if process_name == "chrome.exe":
+        print(f"\nDebug chrome.exe mute decision:")
+        print(f"  PID: {process_id}")
+        
+        # Get foreground process info
+        foreground_window = win32gui.GetForegroundWindow()
+        _, foreground_pid = win32process.GetWindowThreadProcessId(foreground_window)
+        try:
+            fg_process = psutil.Process(foreground_pid)
+            fg_process_name = os.path.basename(fg_process.exe())
+    except:
+            fg_process_name = "unknown"
+            
+        # Get background process info
+        try:
+            bg_process = psutil.Process(process_id)
+            bg_process_name = os.path.basename(bg_process.exe())
+        except:
+            bg_process_name = "unknown"
+            
+        print(f"  Foreground process: {fg_process_name} (PID: {foreground_pid})")
+        print(f"  Background process: {bg_process_name} (PID: {process_id})")
+        print(f"  In exceptions list: {process_name in app_state.exceptions_list}")
+        print(f"  Force mute background: {app_state.force_mute_bg_var.get()}")
+        print(f"  Force mute foreground: {app_state.force_mute_fg_var.get()}")
+        print(f"  Is foreground: {is_foreground_process(process_id)}")
+        print(f"  Background audio playing: {app_state.zero_cnt <= 30}")
+        print(f"  Is last active: {process_id == app_state.last_foreground_app_pid}")
+        print(f"  Keep last active unmuted: {not app_state.mute_last_app.get()}")
+        print(f"  Should be muted: {should_be_muted}")
+        print(f"  Reason: {reason}")
 if __name__ == "__main__":
     # Create global state instance
     app_state = AppState()
@@ -450,15 +588,29 @@ if __name__ == "__main__":
     center_frame = Frame(lists_frame, bg=app_state.theme['bg'])
     center_frame.pack(side='left', padx=10)
     
+    def safe_add_exception():
+        selection = lb_non_exceptions.curselection()
+        if not selection:  # If nothing is selected
+            return
+        app_name = lb_non_exceptions.get(selection)
+        app_state.add_exception(app_name)
+
+    def safe_remove_exception():
+        selection = lb_exceptions.curselection()
+        if not selection:  # If nothing is selected
+            return
+        app_name = lb_exceptions.get(selection)
+        app_state.remove_exception(app_name)
+    
     btn_add = Button(center_frame, text="◄ Add to Exceptions", 
-                    command=lambda: app_state.add_exception(lb_non_exceptions.get(lb_non_exceptions.curselection())),
+                    command=safe_add_exception,
                     bg=app_state.theme['button'], 
                     fg=app_state.theme['fg'],
                     activebackground=app_state.theme['active'])
     btn_add.pack(pady=5)
     
     btn_remove = Button(center_frame, text="Remove from Exceptions ►", 
-                       command=lambda: app_state.remove_exception(lb_exceptions.get(lb_exceptions.curselection())),
+                       command=safe_remove_exception,
                        bg=app_state.theme['button'],
                        fg=app_state.theme['fg'],
                        activebackground=app_state.theme['active'])
@@ -551,6 +703,6 @@ if __name__ == "__main__":
 
     # Restore window position and size
     app_state.restore_window_state()
-    
+
     # Start the GUI loop
     app_state.root.mainloop()
