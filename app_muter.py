@@ -1,6 +1,5 @@
 import os
 import sys
-import keyboard
 import psutil
 import pyuac
 import toml
@@ -58,7 +57,6 @@ class AppState:
         self.exceptions_list = self.runtime.get("CURRENT_EXCEPTIONS", [])
         self.to_unmute = []
         self.last_foreground_app_pid = None
-        self.pressed_keys = set()
         self.zero_cnt = 0
 
         # Create Tkinter variables with defaults from runtime config
@@ -263,26 +261,6 @@ class VolumeControlWindow:
     def on_volume_change(self, app_name, value):
         app_state.save_app_volume(app_name, int(float(value)))
 
-def on_release(key):
-    print(f"Released {key.name}")
-
-def on_key_event(key: keyboard.KeyboardEvent):
-    if keyboard.is_pressed("f5") and keyboard.is_pressed('windows'):
-        if "f5" not in app_state.pressed_keys:
-            app_state.pressed_keys.add("f5")
-        else:
-            app_state.pressed_keys.remove("f5")
-    if keyboard.is_pressed("f6") and keyboard.is_pressed('windows'):
-        if "f6" not in app_state.pressed_keys:
-            app_state.pressed_keys.add("f6")
-        else:
-            app_state.pressed_keys.remove("f6")
-    if keyboard.is_pressed("f7") and keyboard.is_pressed('windows'):
-        if "f7" not in app_state.pressed_keys:
-            app_state.pressed_keys.add("f7")
-        else:
-            app_state.pressed_keys.remove("f7")
-
 # Function to check if a specific process ID is the foreground window
 def is_foreground_process(pid):
     if pid <= 0:
@@ -312,16 +290,6 @@ def is_foreground_process(pid):
 
 # Function to update the lists in the GUI
 def update_lists():
-    if app_state.pressed_keys:
-        # this will not work correctly if keys are pressed a few times in 100ms
-        if "f5" in app_state.pressed_keys:
-            app_state.force_mute_fg_var.set(1 - app_state.force_mute_fg_var.get())
-            print("pressed f5")
-        if "f6" in app_state.pressed_keys:
-            app_state.force_mute_bg_var.set(1 - app_state.force_mute_bg_var.get())
-            print("pressed f5")
-        app_state.pressed_keys.clear()
-
     # Remember the current selections
     selected_exception_index = lb_exceptions.curselection()
     selected_non_exception_index = lb_non_exceptions.curselection()
@@ -484,7 +452,6 @@ if __name__ == "__main__":
     app_state = AppState()
     app_state.setup_main_window()
 
-    keyboard.hook(on_key_event)
     APP_GROUPS = [
         ["steam.exe", "steamwebhelper.exe"]
     ]
