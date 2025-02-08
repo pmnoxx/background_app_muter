@@ -280,9 +280,9 @@ def is_foreground_process(pid):
         bg_process_exe_name = os.path.basename(bg_process.exe())
 
         if fg_process_exe_name != bg_process_exe_name:
-            for proc_group in app_state.MUTE_GROUPS:
-                if fg_process_exe_name in proc_group and bg_process_exe_name in proc_group:
-                    return True
+            # Check if both processes are in the mute group
+            if fg_process_exe_name in app_state.MUTE_GROUPS and bg_process_exe_name in app_state.MUTE_GROUPS:
+                return True
         return pid == foreground_pid
     except psutil.NoSuchProcess:
         return False
@@ -428,10 +428,6 @@ if __name__ == "__main__":
     # Create global state instance
     app_state = AppState()
     app_state.setup_main_window()
-
-    APP_GROUPS = [
-        ["steam.exe", "steamwebhelper.exe"]
-    ]
 
     # Create the listboxes and labels
     label_exceptions = Label(app_state.root, text="Exceptions (Not Muted)", 
