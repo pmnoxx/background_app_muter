@@ -4,7 +4,9 @@ CURRENT_EXCEPTIONS = [ "chrome.exe", "firefox.exe", "msedge.exe",]
 mute_last_app = 0
 force_mute_fg = 0
 force_mute_bg = 0
-volume = 100
-background_volume = 100
 mute_foreground_when_background = 0
-lock = 0 
+lock = 0
+
+[WINDOW_STATE]
+geometry = "587x761+100+100"
+maximized = false

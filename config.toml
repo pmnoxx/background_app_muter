@@ -1,6 +1,13 @@
 DEFAULT_EXCEPTIONS = [ "chrome.exe", "firefox.exe", "msedge.exe",]
 MUTE_GROUPS = [ [ "steam.exe", "steamwebhelper.exe",],]
 
+[APP_VOLUMES]
+"chrome.exe" = 54
+"firefox.exe" = 100
+"msedge.exe" = 100
+"HeavenBurnsRed.exe" = 22
+"s.exe" = 100
+
 [WINDOW]
 min_width = 300
 min_height = 500

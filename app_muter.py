@@ -8,7 +8,7 @@ import win32gui
 import win32process
 
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
-from tkinter import Tk, Listbox, Button, Label, END, Checkbutton, IntVar, Scale
+from tkinter import Tk, Listbox, Button, Label, END, Checkbutton, IntVar, Scale, Toplevel, Frame, Entry, StringVar
 
 def read_config(filename):
     try:
@@ -64,13 +64,21 @@ class AppState:
         self.force_mute_bg_var = IntVar(value=runtime_settings.get("force_mute_bg", 0))
         self.lock_var = IntVar(value=runtime_settings.get("lock", 0))
         self.mute_foreground_when_background = IntVar(value=runtime_settings.get("mute_foreground_when_background", 0))
-        self.background_volume_var = IntVar(value=runtime_settings.get("background_volume", 100))
-        self.volume_var = IntVar(value=runtime_settings.get("volume", 100))
+
+        # Get window geometry from runtime settings
+        window_settings = self.runtime.get("WINDOW_STATE", {})
+        self.window_state = {
+            'geometry': window_settings.get('geometry', None),
+            'maximized': window_settings.get('maximized', False)
+        }
 
         # Load exceptions if none exist
         if not self.exceptions_list:
             self.exceptions_list = self.DEFAULT_EXCEPTION_LIST.copy()
             self.save_exceptions()
+
+        # Load app-specific volumes
+        self.app_volumes = self.config.get("APP_VOLUMES", {})
 
     def save_exceptions(self):
         """Save exceptions to runtime file"""
@@ -88,8 +96,6 @@ class AppState:
                 "mute_last_app": self.mute_last_app.get(),
                 "force_mute_fg": self.force_mute_fg_var.get(),
                 "force_mute_bg": self.force_mute_bg_var.get(),
-                "volume": self.volume_var.get(),
-                "background_volume": self.background_volume_var.get(),
                 "mute_foreground_when_background": self.mute_foreground_when_background.get(),
                 "lock": self.lock_var.get(),
             }
@@ -113,6 +119,130 @@ class AppState:
     def update_params(self):
         """Update runtime parameters"""
         self.save_runtime()
+
+    def save_window_state(self):
+        """Save current window position and size"""
+        try:
+            # Get current window state
+            if root.state() == 'zoomed':  # Window is maximized
+                self.window_state['maximized'] = True
+                # Store the last known normal geometry
+                if hasattr(root, 'last_normal_geometry'):
+                    self.window_state['geometry'] = root.last_normal_geometry
+            else:
+                self.window_state['maximized'] = False
+                self.window_state['geometry'] = root.geometry()
+                # Store current geometry for when window is unmaximized
+                root.last_normal_geometry = root.geometry()
+
+            # Update runtime settings
+            self.runtime["WINDOW_STATE"] = self.window_state
+            self.save_runtime()
+        except Exception as e:
+            print(f"Error saving window state: {e}")
+
+    def restore_window_state(self):
+        """Restore saved window position and size"""
+        if self.window_state['geometry']:
+            root.geometry(self.window_state['geometry'])
+        if self.window_state['maximized']:
+            root.state('zoomed')
+
+    def save_config(self):
+        """Save configuration settings to file"""
+        try:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            config_path = os.path.join(script_dir, "config.toml")
+            
+            with open(config_path, "w") as f:
+                toml.dump(self.config, f)
+        except Exception as e:
+            print(f"Error saving config: {e}")
+
+    def save_app_volume(self, app_name, volume):
+        """Save volume setting for specific app"""
+        self.app_volumes[app_name] = volume
+        self.config["APP_VOLUMES"] = self.app_volumes
+        self.save_config()
+
+    def get_app_volume(self, app_name):
+        """Get volume setting for specific app"""
+        return self.app_volumes.get(app_name, 100)
+
+class VolumeControlWindow:
+    def __init__(self, parent, app_state):
+        self.window = Toplevel(parent)
+        self.window.title("App Volume Control")
+        self.window.configure(bg=app_state.theme['bg'])
+        
+        # Search frame
+        search_frame = Frame(self.window, bg=app_state.theme['bg'])
+        search_frame.pack(fill='x', padx=5, pady=5)
+        
+        Label(search_frame, text="Search:", 
+              bg=app_state.theme['bg'], 
+              fg=app_state.theme['fg']).pack(side='left')
+        
+        self.search_var = StringVar()
+        self.search_var.trace('w', self.filter_apps)
+        Entry(search_frame, textvariable=self.search_var,
+              bg=app_state.theme['button'],
+              fg=app_state.theme['fg']).pack(side='left', fill='x', expand=True)
+        
+        # Apps frame
+        self.apps_frame = Frame(self.window, bg=app_state.theme['bg'])
+        self.apps_frame.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        self.volume_vars = {}
+        self.update_app_list()
+        
+    def filter_apps(self, *args):
+        search_text = self.search_var.get().lower()
+        for widget in self.apps_frame.winfo_children():
+            widget.destroy()
+        
+        self.update_app_list(search_text)
+        
+    def update_app_list(self, filter_text=""):
+        sessions = AudioUtilities.GetAllSessions()
+        
+        for session in sessions:
+            if not session.Process:
+                continue
+                
+            try:
+                process = psutil.Process(session.ProcessId)
+                app_name = os.path.basename(process.exe())
+                
+                if filter_text and filter_text not in app_name.lower():
+                    continue
+                
+                frame = Frame(self.apps_frame, bg=app_state.theme['bg'])
+                frame.pack(fill='x', padx=5, pady=2)
+                
+                Label(frame, text=app_name, 
+                      bg=app_state.theme['bg'],
+                      fg=app_state.theme['fg'],
+                      width=20, anchor='w').pack(side='left')
+                
+                volume_var = IntVar(value=app_state.get_app_volume(app_name))
+                self.volume_vars[app_name] = volume_var
+                
+                scale = Scale(frame, from_=0, to=100,
+                            orient='horizontal',
+                            variable=volume_var,
+                            bg=app_state.theme['bg'],
+                            fg=app_state.theme['fg'],
+                            troughcolor=app_state.theme['button'],
+                            activebackground=app_state.theme['active'],
+                            command=lambda v, a=app_name: self.on_volume_change(a, v))
+                scale.pack(side='left', fill='x', expand=True)
+                
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    
+    def on_volume_change(self, app_name, value):
+        app_state.save_app_volume(app_name, int(float(value)))
 
 root = Tk()
 
@@ -276,15 +406,15 @@ def mute_unmute_apps():
 
         # Skip muting Chrome windows
         if process_name in app_state.exceptions_list:
-            background_volume_value = float(app_state.background_volume_var.get()) / 100
+            volume_value = float(app_state.get_app_volume(process_name)) / 100
 
-            if current_volume is None or abs(current_volume - background_volume_value) > 0.001:
-                volume.SetMasterVolume(background_volume_value, None)
+            if current_volume is None or abs(current_volume - volume_value) > 0.001:
+                volume.SetMasterVolume(volume_value, None)
 
             if app_state.force_mute_bg_var.get() == 1:
                 should_be_muted = True
         else:
-            volume_value = float(app_state.volume_var.get()) / 100
+            volume_value = float(app_state.get_app_volume(process_name)) / 100
 
             if current_volume is None or abs(current_volume - volume_value) > 0.001:
                 volume.SetMasterVolume(volume_value, None)
@@ -377,47 +507,42 @@ if __name__ == "__main__":
                        bg='#3c3f41', fg='white', activebackground='#4b6eaf')
     btn_remove.pack()
 
-    # Checkbox for muting the last opened app
-    cb_mute_last_app = Checkbutton(root, text="Mute Last Opened App", 
+    # Checkbox for keeping last app unmuted
+    cb_mute_last_app = Checkbutton(root, text="Keep Last Active App Unmuted", 
                                   variable=app_state.mute_last_app,
                                   bg='#2b2b2b', fg='white', 
                                   selectcolor='#3c3f41', 
                                   activebackground='#2b2b2b')
     cb_mute_last_app.pack()
 
-    cb_force_mute_fg = Checkbutton(root, text="Force mute fg", variable=app_state.force_mute_fg_var,
-                                  bg='#2b2b2b', fg='white', selectcolor='#3c3f41', activebackground='#2b2b2b')
+    cb_force_mute_fg = Checkbutton(root, text="Always Mute Foreground Apps", 
+                                  variable=app_state.force_mute_fg_var,
+                                  bg='#2b2b2b', fg='white', 
+                                  selectcolor='#3c3f41', 
+                                  activebackground='#2b2b2b')
     cb_force_mute_fg.pack()
 
-    cb_force_mute_bg = Checkbutton(root, text="Force mute bg", variable=app_state.force_mute_bg_var,
-                                  bg='#2b2b2b', fg='white', selectcolor='#3c3f41', activebackground='#2b2b2b')
+    cb_force_mute_bg = Checkbutton(root, text="Always Mute Background Apps", 
+                                  variable=app_state.force_mute_bg_var,
+                                  bg='#2b2b2b', fg='white', 
+                                  selectcolor='#3c3f41', 
+                                  activebackground='#2b2b2b')
     cb_force_mute_bg.pack()
 
-    cb_lock = Checkbutton(root, text="Lock Mode", variable=app_state.lock_var,
-                         bg='#2b2b2b', fg='white', selectcolor='#3c3f41', activebackground='#2b2b2b')
+    cb_lock = Checkbutton(root, text="Pause Auto-Muting", 
+                         variable=app_state.lock_var,
+                         bg='#2b2b2b', fg='white', 
+                         selectcolor='#3c3f41', 
+                         activebackground='#2b2b2b')
     cb_lock.pack()
 
-    cb_mute_forground_when_background = Checkbutton(root, text="Mute foreground when background is playing",
+    cb_mute_forground_when_background = Checkbutton(root, 
+                                                   text="Auto-Mute Active App When Others Play Sound",
                                                    variable=app_state.mute_foreground_when_background,
-                                                   bg='#2b2b2b', fg='white', selectcolor='#3c3f41', activebackground='#2b2b2b')
+                                                   bg='#2b2b2b', fg='white', 
+                                                   selectcolor='#3c3f41', 
+                                                   activebackground='#2b2b2b')
     cb_mute_forground_when_background.pack()
-
-    # Add labels for volume sliders
-    Label(root, text="Background Volume:", bg='#2b2b2b', fg='white').pack()
-    background_volume_scale = Scale(root, from_=0, to=100, orient='horizontal', 
-                                  variable=app_state.background_volume_var,
-                                  bg='#2b2b2b', fg='white', 
-                                  troughcolor='#3c3f41',
-                                  activebackground='#4b6eaf')
-    background_volume_scale.pack()
-
-    Label(root, text="Foreground Volume:", bg='#2b2b2b', fg='white').pack()
-    volume_scale = Scale(root, from_=0, to=100, orient='horizontal', 
-                        variable=app_state.volume_var,
-                        bg='#2b2b2b', fg='white', 
-                        troughcolor='#3c3f41',
-                        activebackground='#4b6eaf')
-    volume_scale.pack()
 
     # Schedule the first update of the lists
     root.after(100, update_lists)
@@ -427,8 +552,25 @@ if __name__ == "__main__":
     app_state.mute_last_app.trace("w", lambda *args: app_state.update_params())
     app_state.force_mute_fg_var.trace("w", lambda *args: app_state.update_params())
     app_state.force_mute_bg_var.trace("w", lambda *args: app_state.update_params())
-    app_state.volume_var.trace("w", lambda *args: app_state.update_params())
     app_state.mute_foreground_when_background.trace("w", lambda *args: app_state.update_params())
+
+    # Restore window position and size
+    app_state.restore_window_state()
+    
+    # Bind window events to save position and size
+    root.bind("<Configure>", lambda e: app_state.save_window_state())
+
+    # Add to main window creation:
+    def show_volume_control():
+        VolumeControlWindow(root, app_state)
+
+    # Add button to main window
+    btn_volume_control = Button(root, text="App Volume Settings",
+                              command=show_volume_control,
+                              bg=app_state.theme['button'],
+                              fg=app_state.theme['fg'],
+                              activebackground=app_state.theme['active'])
+    btn_volume_control.pack(pady=5)
 
     # Start the GUI loop
     root.mainloop()
