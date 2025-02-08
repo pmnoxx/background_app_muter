@@ -24,6 +24,9 @@ def read_config(filename):
 
 class AppState:
     def __init__(self):
+        # Create main window first
+        self.root = Tk()
+        
         # Load configuration
         self.config = read_config("config.toml")
         self.runtime = read_config("runtime.toml")
@@ -80,6 +83,22 @@ class AppState:
         # Load app-specific volumes
         self.app_volumes = self.config.get("APP_VOLUMES", {})
 
+    def setup_main_window(self):
+        """Initialize main window settings"""
+        self.root.title("App Muter")
+        self.root.configure(bg=self.theme['bg'])
+        self.root.minsize(self.window['min_width'], self.window['min_height'])
+        
+        # Center window
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        center_x = int(screen_width/2 - self.window['width']/2)
+        center_y = int(screen_height/2 - self.window['height']/2)
+        self.root.geometry(f'{self.window["width"]}x{self.window["height"]}+{center_x}+{center_y}')
+        
+        # Bind window events
+        self.root.bind("<Configure>", lambda e: self.save_window_state())
+
     def save_exceptions(self):
         """Save exceptions to runtime file"""
         self.runtime["CURRENT_EXCEPTIONS"] = self.exceptions_list
@@ -124,16 +143,16 @@ class AppState:
         """Save current window position and size"""
         try:
             # Get current window state
-            if root.state() == 'zoomed':  # Window is maximized
+            if self.root.state() == 'zoomed':  # Window is maximized
                 self.window_state['maximized'] = True
                 # Store the last known normal geometry
-                if hasattr(root, 'last_normal_geometry'):
-                    self.window_state['geometry'] = root.last_normal_geometry
+                if hasattr(self.root, 'last_normal_geometry'):
+                    self.window_state['geometry'] = self.root.last_normal_geometry
             else:
                 self.window_state['maximized'] = False
-                self.window_state['geometry'] = root.geometry()
+                self.window_state['geometry'] = self.root.geometry()
                 # Store current geometry for when window is unmaximized
-                root.last_normal_geometry = root.geometry()
+                self.root.last_normal_geometry = self.root.geometry()
 
             # Update runtime settings
             self.runtime["WINDOW_STATE"] = self.window_state
@@ -144,9 +163,9 @@ class AppState:
     def restore_window_state(self):
         """Restore saved window position and size"""
         if self.window_state['geometry']:
-            root.geometry(self.window_state['geometry'])
+            self.root.geometry(self.window_state['geometry'])
         if self.window_state['maximized']:
-            root.state('zoomed')
+            self.root.state('zoomed')
 
     def save_config(self):
         """Save configuration settings to file"""
@@ -244,11 +263,6 @@ class VolumeControlWindow:
     def on_volume_change(self, app_name, value):
         app_state.save_app_volume(app_name, int(float(value)))
 
-root = Tk()
-
-# Create global state instance
-app_state = AppState()
-
 def on_release(key):
     print(f"Released {key.name}")
 
@@ -339,14 +353,14 @@ def update_lists():
         lb_non_exceptions.selection_set(selected_non_exception_index)
 
     # Schedule the next update
-    root.after(100, update_lists)
+    app_state.root.after(100, update_lists)
 
 # Function to mute/unmute applications
 def mute_unmute_apps():
     global app_state
 
     if app_state.lock_var.get():
-        root.after(100, mute_unmute_apps)
+        app_state.root.after(100, mute_unmute_apps)
         return
 
     # Get the list of all the current sessions
@@ -441,7 +455,7 @@ def mute_unmute_apps():
             print(f"Unmuted({process_id}): {process_name} [{process_name}] PeakValue: {peak_value}")
 
     app_state.to_unmute.clear()
-    root.after(100, mute_unmute_apps)
+    app_state.root.after(100, mute_unmute_apps)
 
 def is_admin():
     """Check if the current process is running with administrative privileges"""
@@ -466,77 +480,69 @@ def run_as_admin():
 if __name__ == "__main__":
     run_as_admin()
 
+    # Create global state instance
+    app_state = AppState()
+    app_state.setup_main_window()
+
     keyboard.hook(on_key_event)
     APP_GROUPS = [
         ["steam.exe", "steamwebhelper.exe"]
     ]
 
-    # Create the main window
-    root.title("App Muter")
-    root.configure(bg=app_state.theme['bg'])
-    root.minsize(app_state.window['min_width'], app_state.window['min_height'])
-    
-    # Center window
-    screen_width = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
-    center_x = int(screen_width/2 - app_state.window['width']/2)
-    center_y = int(screen_height/2 - app_state.window['height']/2)
-    root.geometry(f'{app_state.window["width"]}x{app_state.window["height"]}+{center_x}+{center_y}')
-
     # Create the listboxes and labels
-    label_exceptions = Label(root, text="Exceptions (Not Muted)", 
+    label_exceptions = Label(app_state.root, text="Exceptions (Not Muted)", 
                            bg=app_state.theme['bg'], 
                            fg=app_state.theme['fg'])
     label_exceptions.pack()
-    lb_exceptions = Listbox(root, bg='#3c3f41', fg='white', selectbackground='#4b6eaf')
+    lb_exceptions = Listbox(app_state.root, bg='#3c3f41', fg='white', selectbackground='#4b6eaf')
     lb_exceptions.pack()
 
-    label_non_exceptions = Label(root, text="Non-Exceptions (Muted)", bg='#2b2b2b', fg='white')
+    label_non_exceptions = Label(app_state.root, text="Non-Exceptions (Muted)", bg='#2b2b2b', fg='white')
     label_non_exceptions.pack()
-    lb_non_exceptions = Listbox(root, bg='#3c3f41', fg='white', selectbackground='#4b6eaf')
+    lb_non_exceptions = Listbox(app_state.root, bg='#3c3f41', fg='white', selectbackground='#4b6eaf')
     lb_non_exceptions.pack()
 
     # Create the add and remove buttons
-    btn_add = Button(root, text="Add to Exceptions", 
+    btn_add = Button(app_state.root, text="Add to Exceptions", 
                     command=lambda: app_state.add_exception(lb_non_exceptions.get(lb_non_exceptions.curselection())),
                     bg='#3c3f41', fg='white', activebackground='#4b6eaf')
     btn_add.pack()
 
-    btn_remove = Button(root, text="Remove from Exceptions", 
+    btn_remove = Button(app_state.root, text="Remove from Exceptions", 
                        command=lambda: app_state.remove_exception(lb_exceptions.get(lb_exceptions.curselection())),
                        bg='#3c3f41', fg='white', activebackground='#4b6eaf')
     btn_remove.pack()
 
     # Checkbox for keeping last app unmuted
-    cb_mute_last_app = Checkbutton(root, text="Keep Last Active App Unmuted", 
+    cb_mute_last_app = Checkbutton(app_state.root, text="Keep Last Active App Unmuted", 
                                   variable=app_state.mute_last_app,
                                   bg='#2b2b2b', fg='white', 
                                   selectcolor='#3c3f41', 
                                   activebackground='#2b2b2b')
     cb_mute_last_app.pack()
 
-    cb_force_mute_fg = Checkbutton(root, text="Always Mute Foreground Apps", 
+    cb_force_mute_fg = Checkbutton(app_state.root, text="Always Mute Foreground Apps", 
                                   variable=app_state.force_mute_fg_var,
                                   bg='#2b2b2b', fg='white', 
                                   selectcolor='#3c3f41', 
                                   activebackground='#2b2b2b')
     cb_force_mute_fg.pack()
 
-    cb_force_mute_bg = Checkbutton(root, text="Always Mute Background Apps", 
+    cb_force_mute_bg = Checkbutton(app_state.root, text="Always Mute Background Apps", 
                                   variable=app_state.force_mute_bg_var,
                                   bg='#2b2b2b', fg='white', 
                                   selectcolor='#3c3f41', 
                                   activebackground='#2b2b2b')
     cb_force_mute_bg.pack()
 
-    cb_lock = Checkbutton(root, text="Pause Auto-Muting", 
+    cb_lock = Checkbutton(app_state.root, text="Pause Auto-Muting", 
                          variable=app_state.lock_var,
                          bg='#2b2b2b', fg='white', 
                          selectcolor='#3c3f41', 
                          activebackground='#2b2b2b')
     cb_lock.pack()
 
-    cb_mute_forground_when_background = Checkbutton(root, 
+    cb_mute_forground_when_background = Checkbutton(app_state.root, 
                                                    text="Auto-Mute Active App When Others Play Sound",
                                                    variable=app_state.mute_foreground_when_background,
                                                    bg='#2b2b2b', fg='white', 
@@ -545,8 +551,8 @@ if __name__ == "__main__":
     cb_mute_forground_when_background.pack()
 
     # Schedule the first update of the lists
-    root.after(100, update_lists)
-    root.after(100, mute_unmute_apps)
+    app_state.root.after(100, update_lists)
+    app_state.root.after(100, mute_unmute_apps)
 
     # Update variable traces
     app_state.mute_last_app.trace("w", lambda *args: app_state.update_params())
@@ -557,15 +563,12 @@ if __name__ == "__main__":
     # Restore window position and size
     app_state.restore_window_state()
     
-    # Bind window events to save position and size
-    root.bind("<Configure>", lambda e: app_state.save_window_state())
-
     # Add to main window creation:
     def show_volume_control():
-        VolumeControlWindow(root, app_state)
+        VolumeControlWindow(app_state.root, app_state)
 
     # Add button to main window
-    btn_volume_control = Button(root, text="App Volume Settings",
+    btn_volume_control = Button(app_state.root, text="App Volume Settings",
                               command=show_volume_control,
                               bg=app_state.theme['button'],
                               fg=app_state.theme['fg'],
@@ -573,4 +576,4 @@ if __name__ == "__main__":
     btn_volume_control.pack(pady=5)
 
     # Start the GUI loop
-    root.mainloop()
+    app_state.root.mainloop()
