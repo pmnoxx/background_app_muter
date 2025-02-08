@@ -41,7 +41,7 @@ keyboard_listener.start()
 
 # Wait for 15 seconds before starting the recording
 time.sleep(25)
-
+./
 
 # Stop recording
 mouse_listener.stop()

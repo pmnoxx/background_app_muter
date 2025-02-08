@@ -1,21 +1,31 @@
-import sys
-
-import psutil
 import os
-
-import win32gui
-import win32process
+import sys
 import winreg
 import keyboard
+import psutil
 import pyuac
-
-from tkinter import Tk, Listbox, Button, Label, END
+import toml
+import win32gui
+import win32process
 
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
-from tkinter import Checkbutton, IntVar, Scale
-import toml
+from tkinter import Tk, Listbox, Button, Label, END, Checkbutton, IntVar, Scale
 
-DEFAULT_EXCEPTION_LIST = ["chrome.exe", "firefox.exe", "msedge.exe"]
+def read_config(filename):
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        full_path = os.path.join(script_dir, filename)
+
+        with open(full_path, "r") as toml_file:
+            data = toml.load(toml_file)
+            return data
+    except FileNotFoundError:
+        print(f"File '{filename}' not found.")
+        return {}
+
+config = read_config("config.toml")
+DEFAULT_EXCEPTION_LIST = config.get("DEFAULT_EXCEPTIONS", ["chrome.exe", "firefox.exe", "msedge.exe"])
+MUTE_GROUPS = config.get("MUTE_GROUPS", [])
 
 # List to hold the names of processes that should not be muted
 exceptions_list = []

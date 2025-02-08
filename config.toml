@@ -1,0 +1,11 @@
+# Default applications that should not be muted
+DEFAULT_EXCEPTIONS = [
+    "chrome.exe",
+    "firefox.exe", 
+    "msedge.exe"
+]
+
+# Groups of applications that should be treated as related
+MUTE_GROUPS = [
+    ["steam.exe", "steamwebhelper.exe"]
+] 
