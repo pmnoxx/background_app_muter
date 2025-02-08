@@ -29,6 +29,26 @@ class AppState:
         config = read_config("config.toml")
         self.DEFAULT_EXCEPTION_LIST = config.get("DEFAULT_EXCEPTIONS", ["chrome.exe", "firefox.exe", "msedge.exe"])
         self.MUTE_GROUPS = config.get("MUTE_GROUPS", [])
+        
+        # Get default settings
+        defaults = config.get("DEFAULTS", {})
+        window = config.get("WINDOW", {})
+        
+        # Store theme colors
+        self.theme = {
+            'bg': window.get('background_color', '#2b2b2b'),
+            'fg': window.get('foreground_color', 'white'),
+            'button': window.get('button_color', '#3c3f41'),
+            'active': window.get('active_color', '#4b6eaf')
+        }
+        
+        # Store window settings
+        self.window = {
+            'min_width': window.get('min_width', 300),
+            'min_height': window.get('min_height', 500),
+            'width': window.get('width', 400),
+            'height': window.get('height', 600)
+        }
 
         # Initialize state variables
         self.exceptions_list = []
@@ -40,16 +60,20 @@ class AppState:
         # Initialize GUI variables
         self.params = self.load_from_winreg() or {}
         
-        # Create Tkinter variables
-        self.mute_last_app = IntVar(value=self.params.get("mute_last_app") or 0)
-        self.force_mute_fg_var = IntVar(value=self.params.get("force_mute_fg") or 0)
-        self.force_mute_bg_var = IntVar(value=self.params.get("force_mute_bg") or 0)
-        self.lock_var = IntVar(value=self.params.get("lock") or 0)
-        self.mute_foreground_when_background = IntVar(value=self.params.get("mute_foreground_when_background") or 0)
+        # Create Tkinter variables with defaults from config
+        self.mute_last_app = IntVar(value=self.params.get("mute_last_app") or defaults.get("mute_last_app", 0))
+        self.force_mute_fg_var = IntVar(value=self.params.get("force_mute_fg") or defaults.get("force_mute_fg", 0))
+        self.force_mute_bg_var = IntVar(value=self.params.get("force_mute_bg") or defaults.get("force_mute_bg", 0))
+        self.lock_var = IntVar(value=self.params.get("lock") or defaults.get("lock", 0))
+        self.mute_foreground_when_background = IntVar(
+            value=self.params.get("mute_foreground_when_background") or 
+                  defaults.get("mute_foreground_when_background", 0))
         self.background_volume_var = IntVar(
-            value=int(self.params.get("background_volume")) if self.params.get("background_volume") is not None else 100)
+            value=int(self.params.get("background_volume")) if self.params.get("background_volume") is not None 
+            else defaults.get("background_volume", 100))
         self.volume_var = IntVar(
-            value=int(self.params.get("volume")) if self.params.get("volume") is not None else 100)
+            value=int(self.params.get("volume")) if self.params.get("volume") is not None 
+            else defaults.get("volume", 100))
 
         # Load exceptions
         if not self.load_exceptions():
@@ -343,10 +367,20 @@ if __name__ == "__main__":
 
     # Create the main window
     root.title("App Muter")
-    root.configure(bg='#2b2b2b')
+    root.configure(bg=app_state.theme['bg'])
+    root.minsize(app_state.window['min_width'], app_state.window['min_height'])
+    
+    # Center window
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    center_x = int(screen_width/2 - app_state.window['width']/2)
+    center_y = int(screen_height/2 - app_state.window['height']/2)
+    root.geometry(f'{app_state.window["width"]}x{app_state.window["height"]}+{center_x}+{center_y}')
 
     # Create the listboxes and labels
-    label_exceptions = Label(root, text="Exceptions (Not Muted)", bg='#2b2b2b', fg='white')
+    label_exceptions = Label(root, text="Exceptions (Not Muted)", 
+                           bg=app_state.theme['bg'], 
+                           fg=app_state.theme['fg'])
     label_exceptions.pack()
     lb_exceptions = Listbox(root, bg='#3c3f41', fg='white', selectbackground='#4b6eaf')
     lb_exceptions.pack()
