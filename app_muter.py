@@ -429,66 +429,115 @@ if __name__ == "__main__":
     app_state = AppState()
     app_state.setup_main_window()
 
-    # Create the listboxes and labels
-    label_exceptions = Label(app_state.root, text="Exceptions (Not Muted)", 
+    # Create main frame for lists
+    lists_frame = Frame(app_state.root, bg=app_state.theme['bg'])
+    lists_frame.pack(fill='both', expand=True, padx=10, pady=10)
+
+    # Left list (Exceptions)
+    left_frame = Frame(lists_frame, bg=app_state.theme['bg'])
+    left_frame.pack(side='left', fill='both', expand=True)
+    
+    label_exceptions = Label(left_frame, text="Exceptions (Not Muted)", 
                            bg=app_state.theme['bg'], 
                            fg=app_state.theme['fg'])
     label_exceptions.pack()
-    lb_exceptions = Listbox(app_state.root, bg='#3c3f41', fg='white', selectbackground='#4b6eaf')
-    lb_exceptions.pack()
+    lb_exceptions = Listbox(left_frame, bg='#3c3f41', fg='white', 
+                           selectbackground='#4b6eaf',
+                           height=10)
+    lb_exceptions.pack(fill='both', expand=True)
 
-    label_non_exceptions = Label(app_state.root, text="Non-Exceptions (Muted)", bg='#2b2b2b', fg='white')
-    label_non_exceptions.pack()
-    lb_non_exceptions = Listbox(app_state.root, bg='#3c3f41', fg='white', selectbackground='#4b6eaf')
-    lb_non_exceptions.pack()
-
-    # Create the add and remove buttons
-    btn_add = Button(app_state.root, text="Add to Exceptions", 
+    # Center buttons
+    center_frame = Frame(lists_frame, bg=app_state.theme['bg'])
+    center_frame.pack(side='left', padx=10)
+    
+    btn_add = Button(center_frame, text="◄ Add to Exceptions", 
                     command=lambda: app_state.add_exception(lb_non_exceptions.get(lb_non_exceptions.curselection())),
-                    bg='#3c3f41', fg='white', activebackground='#4b6eaf')
-    btn_add.pack()
-
-    btn_remove = Button(app_state.root, text="Remove from Exceptions", 
+                    bg=app_state.theme['button'], 
+                    fg=app_state.theme['fg'],
+                    activebackground=app_state.theme['active'])
+    btn_add.pack(pady=5)
+    
+    btn_remove = Button(center_frame, text="Remove from Exceptions ►", 
                        command=lambda: app_state.remove_exception(lb_exceptions.get(lb_exceptions.curselection())),
-                       bg='#3c3f41', fg='white', activebackground='#4b6eaf')
-    btn_remove.pack()
+                       bg=app_state.theme['button'],
+                       fg=app_state.theme['fg'],
+                       activebackground=app_state.theme['active'])
+    btn_remove.pack(pady=5)
 
-    # Checkbox for keeping last app unmuted
-    cb_mute_last_app = Checkbutton(app_state.root, text="Keep Last Active App Unmuted", 
+    # Right list (Non-exceptions)
+    right_frame = Frame(lists_frame, bg=app_state.theme['bg'])
+    right_frame.pack(side='left', fill='both', expand=True)
+    
+    label_non_exceptions = Label(right_frame, text="Non-Exceptions (Muted)",
+                               bg=app_state.theme['bg'],
+                               fg=app_state.theme['fg'])
+    label_non_exceptions.pack()
+    lb_non_exceptions = Listbox(right_frame, bg='#3c3f41', fg='white',
+                               selectbackground='#4b6eaf',
+                               height=10)
+    lb_non_exceptions.pack(fill='both', expand=True)
+
+    # Middle Section (Checkboxes)
+    checkbox_frame = Frame(app_state.root, bg=app_state.theme['bg'])
+    checkbox_frame.pack(fill='x', padx=10, pady=5)
+
+    # Left column of checkboxes
+    left_checks = Frame(checkbox_frame, bg=app_state.theme['bg'])
+    left_checks.pack(side='left', expand=True)
+    
+    cb_mute_last_app = Checkbutton(left_checks, text="Keep Last Active App Unmuted", 
                                   variable=app_state.mute_last_app,
                                   bg='#2b2b2b', fg='white', 
                                   selectcolor='#3c3f41', 
                                   activebackground='#2b2b2b')
-    cb_mute_last_app.pack()
+    cb_mute_last_app.pack(in_=left_checks, anchor='w', pady=2)
 
-    cb_force_mute_fg = Checkbutton(app_state.root, text="Always Mute Foreground Apps", 
+    cb_force_mute_fg = Checkbutton(left_checks, text="Always Mute Foreground Apps", 
                                   variable=app_state.force_mute_fg_var,
                                   bg='#2b2b2b', fg='white', 
                                   selectcolor='#3c3f41', 
                                   activebackground='#2b2b2b')
-    cb_force_mute_fg.pack()
+    cb_force_mute_fg.pack(in_=left_checks, anchor='w', pady=2)
 
-    cb_force_mute_bg = Checkbutton(app_state.root, text="Always Mute Background Apps", 
+    cb_force_mute_bg = Checkbutton(left_checks, text="Always Mute Background Apps", 
                                   variable=app_state.force_mute_bg_var,
                                   bg='#2b2b2b', fg='white', 
                                   selectcolor='#3c3f41', 
                                   activebackground='#2b2b2b')
-    cb_force_mute_bg.pack()
+    cb_force_mute_bg.pack(in_=left_checks, anchor='w', pady=2)
 
-    cb_lock = Checkbutton(app_state.root, text="Pause Auto-Muting", 
+    # Right column of checkboxes
+    right_checks = Frame(checkbox_frame, bg=app_state.theme['bg'])
+    right_checks.pack(side='left', expand=True)
+    
+    cb_lock = Checkbutton(right_checks, text="Pause Auto-Muting", 
                          variable=app_state.lock_var,
                          bg='#2b2b2b', fg='white', 
                          selectcolor='#3c3f41', 
                          activebackground='#2b2b2b')
-    cb_lock.pack()
+    cb_lock.pack(in_=right_checks, anchor='w', pady=2)
 
-    cb_mute_forground_when_background = Checkbutton(app_state.root, 
+    cb_mute_forground_when_background = Checkbutton(right_checks, 
                                                    text="Auto-Mute Active App When Others Play Sound",
                                                    variable=app_state.mute_foreground_when_background,
                                                    bg='#2b2b2b', fg='white', 
                                                    selectcolor='#3c3f41', 
                                                    activebackground='#2b2b2b')
-    cb_mute_forground_when_background.pack()
+    cb_mute_forground_when_background.pack(in_=right_checks, anchor='w', pady=2)
+
+    # Bottom Section (Volume Control Button)
+    bottom_frame = Frame(app_state.root, bg=app_state.theme['bg'])
+    bottom_frame.pack(fill='x', padx=10, pady=10)
+    
+    def show_volume_control():
+        VolumeControlWindow(app_state.root, app_state)
+
+    btn_volume_control = Button(bottom_frame, text="App Volume Settings",
+                              command=show_volume_control,
+                              bg=app_state.theme['button'],
+                              fg=app_state.theme['fg'],
+                              activebackground=app_state.theme['active'])
+    btn_volume_control.pack(in_=bottom_frame, pady=5)
 
     # Schedule the first update of the lists
     app_state.root.after(100, update_lists)
@@ -503,17 +552,5 @@ if __name__ == "__main__":
     # Restore window position and size
     app_state.restore_window_state()
     
-    # Add to main window creation:
-    def show_volume_control():
-        VolumeControlWindow(app_state.root, app_state)
-
-    # Add button to main window
-    btn_volume_control = Button(app_state.root, text="App Volume Settings",
-                              command=show_volume_control,
-                              bg=app_state.theme['button'],
-                              fg=app_state.theme['fg'],
-                              activebackground=app_state.theme['active'])
-    btn_volume_control.pack(pady=5)
-
     # Start the GUI loop
     app_state.root.mainloop()
