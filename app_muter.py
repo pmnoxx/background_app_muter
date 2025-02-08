@@ -1,6 +1,5 @@
 import os
 import sys
-import winreg
 import keyboard
 import psutil
 import pyuac
@@ -26,13 +25,15 @@ def read_config(filename):
 class AppState:
     def __init__(self):
         # Load configuration
-        config = read_config("config.toml")
-        self.DEFAULT_EXCEPTION_LIST = config.get("DEFAULT_EXCEPTIONS", ["chrome.exe", "firefox.exe", "msedge.exe"])
-        self.MUTE_GROUPS = config.get("MUTE_GROUPS", [])
+        self.config = read_config("config.toml")
+        self.runtime = read_config("runtime.toml")
         
-        # Get default settings
-        defaults = config.get("DEFAULTS", {})
-        window = config.get("WINDOW", {})
+        self.DEFAULT_EXCEPTION_LIST = self.config.get("DEFAULT_EXCEPTIONS", ["chrome.exe", "firefox.exe", "msedge.exe"])
+        self.MUTE_GROUPS = self.config.get("MUTE_GROUPS", [])
+        
+        # Get settings
+        runtime_settings = self.runtime.get("SETTINGS", {})
+        window = self.config.get("WINDOW", {})
         
         # Store theme colors
         self.theme = {
@@ -51,48 +52,52 @@ class AppState:
         }
 
         # Initialize state variables
-        self.exceptions_list = []
+        self.exceptions_list = self.runtime.get("CURRENT_EXCEPTIONS", [])
         self.to_unmute = []
         self.last_foreground_app_pid = None
         self.pressed_keys = set()
         self.zero_cnt = 0
 
-        # Initialize GUI variables
-        self.params = self.load_from_winreg() or {}
-        
-        # Create Tkinter variables with defaults from config
-        self.mute_last_app = IntVar(value=self.params.get("mute_last_app") or defaults.get("mute_last_app", 0))
-        self.force_mute_fg_var = IntVar(value=self.params.get("force_mute_fg") or defaults.get("force_mute_fg", 0))
-        self.force_mute_bg_var = IntVar(value=self.params.get("force_mute_bg") or defaults.get("force_mute_bg", 0))
-        self.lock_var = IntVar(value=self.params.get("lock") or defaults.get("lock", 0))
-        self.mute_foreground_when_background = IntVar(
-            value=self.params.get("mute_foreground_when_background") or 
-                  defaults.get("mute_foreground_when_background", 0))
-        self.background_volume_var = IntVar(
-            value=int(self.params.get("background_volume")) if self.params.get("background_volume") is not None 
-            else defaults.get("background_volume", 100))
-        self.volume_var = IntVar(
-            value=int(self.params.get("volume")) if self.params.get("volume") is not None 
-            else defaults.get("volume", 100))
+        # Create Tkinter variables with defaults from runtime config
+        self.mute_last_app = IntVar(value=runtime_settings.get("mute_last_app", 0))
+        self.force_mute_fg_var = IntVar(value=runtime_settings.get("force_mute_fg", 0))
+        self.force_mute_bg_var = IntVar(value=runtime_settings.get("force_mute_bg", 0))
+        self.lock_var = IntVar(value=runtime_settings.get("lock", 0))
+        self.mute_foreground_when_background = IntVar(value=runtime_settings.get("mute_foreground_when_background", 0))
+        self.background_volume_var = IntVar(value=runtime_settings.get("background_volume", 100))
+        self.volume_var = IntVar(value=runtime_settings.get("volume", 100))
 
-        # Load exceptions
-        if not self.load_exceptions():
+        # Load exceptions if none exist
+        if not self.exceptions_list:
             self.exceptions_list = self.DEFAULT_EXCEPTION_LIST.copy()
-
-    def load_exceptions(self):
-        try:
-            with open('exceptions.txt', 'r') as file:
-                for line in file:
-                    # Remove newline and add to exceptions list
-                    self.exceptions_list.append(line.strip())
-                return True
-        except FileNotFoundError:
-            return False
+            self.save_exceptions()
 
     def save_exceptions(self):
-        with open('exceptions.txt', 'w') as file:
-            for item in self.exceptions_list:
-                file.write("%s\n" % item)
+        """Save exceptions to runtime file"""
+        self.runtime["CURRENT_EXCEPTIONS"] = self.exceptions_list
+        self.save_runtime()
+
+    def save_runtime(self):
+        """Save runtime settings to file"""
+        try:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            runtime_path = os.path.join(script_dir, "runtime.toml")
+            
+            # Update runtime settings
+            self.runtime["SETTINGS"] = {
+                "mute_last_app": self.mute_last_app.get(),
+                "force_mute_fg": self.force_mute_fg_var.get(),
+                "force_mute_bg": self.force_mute_bg_var.get(),
+                "volume": self.volume_var.get(),
+                "background_volume": self.background_volume_var.get(),
+                "mute_foreground_when_background": self.mute_foreground_when_background.get(),
+                "lock": self.lock_var.get(),
+            }
+            
+            with open(runtime_path, "w") as f:
+                toml.dump(self.runtime, f)
+        except Exception as e:
+            print(f"Error saving runtime config: {e}")
 
     def add_exception(self, app_name):
         if app_name and app_name not in self.exceptions_list:
@@ -105,38 +110,9 @@ class AppState:
             self.exceptions_list.remove(app_name)
             self.save_exceptions()
 
-    def load_from_winreg(self):
-        try:
-            # Load dictionary back from registry
-            loaded_dict = {}
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\AppMuter")
-            for i in range(winreg.QueryInfoKey(key)[1]):
-                value_name = winreg.EnumValue(key, i)[0]
-                value = winreg.EnumValue(key, i)[1]
-                loaded_dict[value_name] = value
-            return loaded_dict
-        except Exception as e:
-            print(e)
-            return {}
-
-    def save_to_winreg(self, dict_to_save):
-        # Save dictionary to registry
-        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\AppMuter")
-        for key_name, value in dict_to_save.items():
-            winreg.SetValueEx(key, key_name, 0, winreg.REG_DWORD, value)
-
     def update_params(self):
-        params = {
-            "mute_last_app": self.mute_last_app.get(),
-            "force_mute_fg": self.force_mute_fg_var.get(),
-            "force_mute_bg": self.force_mute_bg_var.get(),
-            "volume": int(self.volume_var.get()),
-            "background_volume": int(self.background_volume_var.get()),
-            "mute_forgeround_when_background": self.mute_foreground_when_background.get(),
-            "lock": 0,  # int(self.lock_var.get()),
-        }
-        print("writing params", params)
-        self.save_to_winreg(params)
+        """Update runtime parameters"""
+        self.save_runtime()
 
 root = Tk()
 

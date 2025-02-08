@@ -1,26 +1,6 @@
-# Default applications that should not be muted
-DEFAULT_EXCEPTIONS = [
-    "chrome.exe",
-    "firefox.exe", 
-    "msedge.exe"
-]
+DEFAULT_EXCEPTIONS = [ "chrome.exe", "firefox.exe", "msedge.exe",]
+MUTE_GROUPS = [ [ "steam.exe", "steamwebhelper.exe",],]
 
-# Groups of applications that should be treated as related
-MUTE_GROUPS = [
-    ["steam.exe", "steamwebhelper.exe"]
-]
-
-# Default settings
-[DEFAULTS]
-mute_last_app = 0
-force_mute_fg = 0
-force_mute_bg = 0
-volume = 100
-background_volume = 100
-mute_foreground_when_background = 0
-lock = 0
-
-# Window settings
 [WINDOW]
 min_width = 300
 min_height = 500
@@ -29,4 +9,4 @@ height = 600
 background_color = "#2b2b2b"
 foreground_color = "white"
 button_color = "#3c3f41"
-active_color = "#4b6eaf" 
+active_color = "#4b6eaf"
