@@ -37,6 +37,20 @@ class AppState:
         self.pressed_keys = set()
         self.zero_cnt = 0
 
+        # Initialize GUI variables
+        self.params = self.load_from_winreg() or {}
+        
+        # Create Tkinter variables
+        self.mute_last_app = IntVar(value=self.params.get("mute_last_app") or 0)
+        self.force_mute_fg_var = IntVar(value=self.params.get("force_mute_fg") or 0)
+        self.force_mute_bg_var = IntVar(value=self.params.get("force_mute_bg") or 0)
+        self.lock_var = IntVar(value=self.params.get("lock") or 0)
+        self.mute_foreground_when_background = IntVar(value=self.params.get("mute_foreground_when_background") or 0)
+        self.background_volume_var = IntVar(
+            value=int(self.params.get("background_volume")) if self.params.get("background_volume") is not None else 100)
+        self.volume_var = IntVar(
+            value=int(self.params.get("volume")) if self.params.get("volume") is not None else 100)
+
         # Load exceptions
         if not self.load_exceptions():
             self.exceptions_list = self.DEFAULT_EXCEPTION_LIST.copy()
@@ -66,6 +80,41 @@ class AppState:
         if app_name and app_name in self.exceptions_list:
             self.exceptions_list.remove(app_name)
             self.save_exceptions()
+
+    def load_from_winreg(self):
+        try:
+            # Load dictionary back from registry
+            loaded_dict = {}
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\AppMuter")
+            for i in range(winreg.QueryInfoKey(key)[1]):
+                value_name = winreg.EnumValue(key, i)[0]
+                value = winreg.EnumValue(key, i)[1]
+                loaded_dict[value_name] = value
+            return loaded_dict
+        except Exception as e:
+            print(e)
+            return {}
+
+    def save_to_winreg(self, dict_to_save):
+        # Save dictionary to registry
+        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\AppMuter")
+        for key_name, value in dict_to_save.items():
+            winreg.SetValueEx(key, key_name, 0, winreg.REG_DWORD, value)
+
+    def update_params(self):
+        params = {
+            "mute_last_app": self.mute_last_app.get(),
+            "force_mute_fg": self.force_mute_fg_var.get(),
+            "force_mute_bg": self.force_mute_bg_var.get(),
+            "volume": int(self.volume_var.get()),
+            "background_volume": int(self.background_volume_var.get()),
+            "mute_forgeround_when_background": self.mute_foreground_when_background.get(),
+            "lock": 0,  # int(self.lock_var.get()),
+        }
+        print("writing params", params)
+        self.save_to_winreg(params)
+
+root = Tk()
 
 # Create global state instance
 app_state = AppState()
@@ -122,10 +171,10 @@ def update_lists():
     if app_state.pressed_keys:
         # this will not work correctly if keys are pressed a few times in 100ms
         if "f5" in app_state.pressed_keys:
-            force_mute_fg_var.set(1 - force_mute_fg_var.get())
+            app_state.force_mute_fg_var.set(1 - app_state.force_mute_fg_var.get())
             print("pressed f5")
         if "f6" in app_state.pressed_keys:
-            force_mute_bg_var.set(1 - force_mute_bg_var.get())
+            app_state.force_mute_bg_var.set(1 - app_state.force_mute_bg_var.get())
             print("pressed f5")
         app_state.pressed_keys.clear()
 
@@ -166,7 +215,7 @@ def update_lists():
 def mute_unmute_apps():
     global app_state
 
-    if lock_var.get():
+    if app_state.lock_var.get():
         root.after(100, mute_unmute_apps)
         return
 
@@ -227,21 +276,21 @@ def mute_unmute_apps():
 
         # Skip muting Chrome windows
         if process_name in app_state.exceptions_list:
-            background_volume_value = float(background_volume_var.get()) / 100
+            background_volume_value = float(app_state.background_volume_var.get()) / 100
 
             if current_volume is None or abs(current_volume - background_volume_value) > 0.001:
                 volume.SetMasterVolume(background_volume_value, None)
 
-            if force_mute_bg_var.get() == 1:
+            if app_state.force_mute_bg_var.get() == 1:
                 should_be_muted = True
         else:
-            volume_value = float(volume_var.get()) / 100
+            volume_value = float(app_state.volume_var.get()) / 100
 
             if current_volume is None or abs(current_volume - volume_value) > 0.001:
                 volume.SetMasterVolume(volume_value, None)
 
             # Check if the process ID is the foreground process
-            if force_mute_fg_var.get() == 1 or (mute_foreground_when_background.get() == 1 and app_state.zero_cnt <= 30):
+            if app_state.force_mute_fg_var.get() == 1 or (app_state.mute_foreground_when_background.get() == 1 and app_state.zero_cnt <= 30):
                 should_be_muted = True
             elif is_foreground_process(process_id):
                 app_state.last_foreground_app_pid = process_id
@@ -250,7 +299,7 @@ def mute_unmute_apps():
                 should_be_muted = False
             else:
                 should_be_muted = True
-                if not mute_last_app.get() and process_id == app_state.last_foreground_app_pid:
+                if not app_state.mute_last_app.get() and process_id == app_state.last_foreground_app_pid:
                     if not non_zero_other:
                         should_be_muted = False
 
@@ -293,9 +342,8 @@ if __name__ == "__main__":
     ]
 
     # Create the main window
-    root = Tk()
     root.title("App Muter")
-    root.configure(bg='#2b2b2b')  # Dark grey background
+    root.configure(bg='#2b2b2b')
 
     # Create the listboxes and labels
     label_exceptions = Label(root, text="Exceptions (Not Muted)", bg='#2b2b2b', fg='white')
@@ -319,97 +367,55 @@ if __name__ == "__main__":
                        bg='#3c3f41', fg='white', activebackground='#4b6eaf')
     btn_remove.pack()
 
-    def load_from_winreg():
-        try:
-            # Load dictionary back from registry
-            loaded_dict = {}
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\AppMuter")
-            for i in range(winreg.QueryInfoKey(key)[1]):
-                value_name = winreg.EnumValue(key, i)[0]
-                value = winreg.EnumValue(key, i)[1]
-                loaded_dict[value_name] = value
-            return loaded_dict
-        except Exception as e:
-            print(e)
-            return {}
-
-    def save_to_winreg(dict_to_save):
-        # Save dictionary to registry
-        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\AppMuter")
-        for key_name, value in dict_to_save.items():
-            winreg.SetValueEx(key, key_name, 0, winreg.REG_DWORD, value)
-
-    params = load_from_winreg() or {}
-    print(params)
-
     # Checkbox for muting the last opened app
-    mute_last_app = IntVar(value=params.get("mute_last_app") or 0)
-    cb_mute_last_app = Checkbutton(root, text="Mute Last Opened App", variable=mute_last_app,
-                                  bg='#2b2b2b', fg='white', selectcolor='#3c3f41', activebackground='#2b2b2b')
+    cb_mute_last_app = Checkbutton(root, text="Mute Last Opened App", 
+                                  variable=app_state.mute_last_app,
+                                  bg='#2b2b2b', fg='white', 
+                                  selectcolor='#3c3f41', 
+                                  activebackground='#2b2b2b')
     cb_mute_last_app.pack()
 
-    force_mute_fg_var = IntVar(value=params.get("force_mute_fg") or 0)
-    cb_force_mute_fg = Checkbutton(root, text="Force mute fg", variable=force_mute_fg_var,
+    cb_force_mute_fg = Checkbutton(root, text="Force mute fg", variable=app_state.force_mute_fg_var,
                                   bg='#2b2b2b', fg='white', selectcolor='#3c3f41', activebackground='#2b2b2b')
     cb_force_mute_fg.pack()
 
-    force_mute_bg_var = IntVar(value=params.get("force_mute_bg") or 0)
-    cb_force_mute_bg = Checkbutton(root, text="Force mute bg", variable=force_mute_bg_var,
+    cb_force_mute_bg = Checkbutton(root, text="Force mute bg", variable=app_state.force_mute_bg_var,
                                   bg='#2b2b2b', fg='white', selectcolor='#3c3f41', activebackground='#2b2b2b')
     cb_force_mute_bg.pack()
 
-    lock_var = IntVar(value=params.get("lock") or 0)
-    cb_lock = Checkbutton(root, text="Lock Mode", variable=lock_var,
+    cb_lock = Checkbutton(root, text="Lock Mode", variable=app_state.lock_var,
                          bg='#2b2b2b', fg='white', selectcolor='#3c3f41', activebackground='#2b2b2b')
     cb_lock.pack()
 
-    mute_foreground_when_background = IntVar(value=params.get("mute_foreground_when_background") or 0)
     cb_mute_forground_when_background = Checkbutton(root, text="Mute foreground when background is playing",
-                                                   variable=mute_foreground_when_background,
+                                                   variable=app_state.mute_foreground_when_background,
                                                    bg='#2b2b2b', fg='white', selectcolor='#3c3f41', activebackground='#2b2b2b')
     cb_mute_forground_when_background.pack()
 
-    background_volume_var = IntVar(
-        value=int(params.get("background_volume")) if params.get("background_volume") is not None else 100)
-
     background_volume_scale = Scale(root, from_=0, to=100, orient='horizontal', 
-                                  variable=background_volume_var,
+                                  variable=app_state.background_volume_var,
                                   bg='#2b2b2b', fg='white', 
                                   troughcolor='#3c3f41',
                                   activebackground='#4b6eaf')
     background_volume_scale.pack()
 
-    volume_var = IntVar(value=int(params.get("volume")) if params.get("volume") is not None else 100)
-
     volume_scale = Scale(root, from_=0, to=100, orient='horizontal', 
-                        variable=volume_var,
+                        variable=app_state.volume_var,
                         bg='#2b2b2b', fg='white', 
                         troughcolor='#3c3f41',
                         activebackground='#4b6eaf')
     volume_scale.pack()
 
-    def update_params():
-        params = {
-            "mute_last_app": mute_last_app.get(),
-            "force_mute_fg": force_mute_fg_var.get(),
-            "force_mute_bg": force_mute_bg_var.get(),
-            "volume": int(volume_var.get()),
-            "background_volume": int(background_volume_var.get()),
-            "mute_forgeround_when_background": mute_foreground_when_background.get(),
-            "lock": 0, # int(lock_var.get()),
-        }
-        print("writing params", params)
-        save_to_winreg(params)
-
-    mute_last_app.trace("w", lambda *args: update_params())
-    force_mute_fg_var.trace("w", lambda *args: update_params())
-    force_mute_bg_var.trace("w", lambda *args: update_params())
-    volume_var.trace("w", lambda *args: update_params())
-    mute_foreground_when_background.trace("w", lambda *args: update_params())
-
     # Schedule the first update of the lists
     root.after(100, update_lists)
     root.after(100, mute_unmute_apps)
+
+    # Update variable traces
+    app_state.mute_last_app.trace("w", lambda *args: app_state.update_params())
+    app_state.force_mute_fg_var.trace("w", lambda *args: app_state.update_params())
+    app_state.force_mute_bg_var.trace("w", lambda *args: app_state.update_params())
+    app_state.volume_var.trace("w", lambda *args: app_state.update_params())
+    app_state.mute_foreground_when_background.trace("w", lambda *args: app_state.update_params())
 
     # Start the GUI loop
     root.mainloop()
