@@ -1,7 +1,6 @@
 import os
 import sys
 import psutil
-import pyuac
 import toml
 import win32gui
 import win32process
@@ -425,29 +424,7 @@ def mute_unmute_apps():
     app_state.to_unmute.clear()
     app_state.root.after(100, mute_unmute_apps)
 
-def is_admin():
-    """Check if the current process is running with administrative privileges"""
-    try:
-        return pyuac.isUserAdmin()
-    except:
-        return False
-
-def run_as_admin():
-    """Run the current script with administrative privileges"""
-    if not is_admin():
-        print("This script requires administrative privileges to run.")
-        try:
-            pyuac.runAsAdmin(wait=False)
-        except:
-            pass
-        sys.exit(0)
-    else:
-        # Your code here
-        print("Running with administrative privileges.")
-
 if __name__ == "__main__":
-    run_as_admin()
-
     # Create global state instance
     app_state = AppState()
     app_state.setup_main_window()
