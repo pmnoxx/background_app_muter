@@ -392,6 +392,8 @@ if __name__ == "__main__":
                                                    bg='#2b2b2b', fg='white', selectcolor='#3c3f41', activebackground='#2b2b2b')
     cb_mute_forground_when_background.pack()
 
+    # Add labels for volume sliders
+    Label(root, text="Background Volume:", bg='#2b2b2b', fg='white').pack()
     background_volume_scale = Scale(root, from_=0, to=100, orient='horizontal', 
                                   variable=app_state.background_volume_var,
                                   bg='#2b2b2b', fg='white', 
@@ -399,6 +401,7 @@ if __name__ == "__main__":
                                   activebackground='#4b6eaf')
     background_volume_scale.pack()
 
+    Label(root, text="Foreground Volume:", bg='#2b2b2b', fg='white').pack()
     volume_scale = Scale(root, from_=0, to=100, orient='horizontal', 
                         variable=app_state.volume_var,
                         bg='#2b2b2b', fg='white', 
