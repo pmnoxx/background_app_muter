@@ -2,12 +2,19 @@ DEFAULT_EXCEPTIONS = [ "chrome.exe", "firefox.exe", "msedge.exe",]
 MUTE_GROUPS = [ "steam.exe", "steamwebhelper.exe",]
 PID_MATCH_APPS = []
 HIDE_TITLEBAR_APPS = [ "HeavenBurnsRed.exe",]
+MAXIMIZE_APPS = []
+
+[BORDER_STYLES]
+"HeavenBurnsRed.exe" = "no_change"
+
+[WINDOW_PLACEMENTS]
+"HeavenBurnsRed.exe" = "right"
 
 [APP_VOLUMES]
 "chrome.exe" = 41
 "firefox.exe" = 100
 "msedge.exe" = 100
-"HeavenBurnsRed.exe" = 22
+"HeavenBurnsRed.exe" = 15
 "s.exe" = 100
 
 [WINDOW]
@@ -19,3 +26,7 @@ background_color = "#2b2b2b"
 foreground_color = "white"
 button_color = "#3c3f41"
 active_color = "#4b6eaf"
+
+[CUSTOM_RESOLUTION_APPS."HeavenBurnsRed.exe"]
+width = "fit_19_5_9"
+height = "fit_19_5_9"

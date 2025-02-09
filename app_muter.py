@@ -5,9 +5,12 @@ import toml
 import win32gui
 import win32process
 import win32con
+import win32ui
+import ctypes
+import win32api
 
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
-from tkinter import Tk, Listbox, Button, Label, END, Checkbutton, IntVar, Scale, Toplevel, Frame, Entry, StringVar
+from tkinter import Tk, Listbox, Button, Label, END, Checkbutton, IntVar, Scale, Toplevel, Frame, Entry, StringVar, OptionMenu
 
 def read_config(filename):
     try:
@@ -87,8 +90,74 @@ class AppState:
         # Add hide_titlebar_apps setting
         self.hide_titlebar_apps = self.config.get("HIDE_TITLEBAR_APPS", [])
 
+        # Add maximize_apps setting
+        self.maximize_apps = self.config.get("MAXIMIZE_APPS", [])
+
+        # Define resolution presets by aspect ratio
+        self.RESOLUTION_PRESETS = {
+            # 16:9 options
+            "16:9 720p": {"width": 1280, "height": 720},
+            "16:9 1080p": {"width": 1920, "height": 1080},
+            "16:9 1440p": {"width": 2560, "height": 1440},
+            "16:9 4K": {"width": 3840, "height": 2160},
+            "16:9 Fit Screen": {"width": "fit_16_9", "height": "fit_16_9"},
+            
+            # 19.5:9 options
+            "19.5:9 720p": {"width": 1560, "height": 720},
+            "19.5:9 1080p": {"width": 2340, "height": 1080},
+            "19.5:9 1440p": {"width": 3120, "height": 1440},
+            "19.5:9 Fit Screen": {"width": "fit_19_5_9", "height": "fit_19_5_9"},
+            
+            # 21:9 options
+            "21:9 720p": {"width": 1720, "height": 720},
+            "21:9 1080p": {"width": 2560, "height": 1080},
+            "21:9 1440p": {"width": 3440, "height": 1440},
+            "21:9 Fit Screen": {"width": "fit_21_9", "height": "fit_21_9"},
+            
+            # 32:9 options
+            "32:9 720p": {"width": 2560, "height": 720},
+            "32:9 1080p": {"width": 3840, "height": 1080},
+            "32:9 Fit Screen": {"width": "fit_32_9", "height": "fit_32_9"}
+        }
+        
+        # Add custom resolution settings
+        self.custom_resolution_apps = self.config.get("CUSTOM_RESOLUTION_APPS", {})
+
+        # Define window placement options
+        self.WINDOW_PLACEMENTS = {
+            "No Change": "no_change",
+            "Centered": "center",
+            "Top": "top",
+            "Bottom": "bottom",
+            "Left": "left",
+            "Right": "right",
+            "Top Left": "top_left",
+            "Top Right": "top_right",
+            "Bottom Left": "bottom_left",
+            "Bottom Right": "bottom_right"
+        }
+        
+        # Add window placement settings
+        self.window_placements = self.config.get("WINDOW_PLACEMENTS", {})
+
+        # Define border style options
+        self.BORDER_STYLES = {
+            "No Change": "no_change",
+            "Normal": "normal",
+            "Thin": "thin",
+            "None": "none",
+            "Dialog": "dialog",
+            "Tool": "tool"
+        }
+        
+        # Add border style settings
+        self.border_styles = self.config.get("BORDER_STYLES", {})
+
         # Start title bar hiding timer
         self.root.after(1000, self.check_title_bars)
+
+        # Start window state checks
+        self.root.after(1000, self.check_window_states)
 
     def setup_main_window(self):
         """Initialize main window settings"""
@@ -260,17 +329,33 @@ class AppState:
                         # Get current window style
                         style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
                         
-                        # Check if window has a title bar
-                        if style & win32con.WS_CAPTION:
-                            # Remove title bar
-                            new_style = style & ~win32con.WS_CAPTION
-                            win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, new_style)
-                            # Force window to redraw
-                            win32gui.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
-                                                win32con.SWP_NOMOVE | 
-                                                win32con.SWP_NOSIZE | 
-                                                win32con.SWP_NOZORDER |
-                                                win32con.SWP_FRAMECHANGED)
+                        # Remove title bar but preserve border style
+                        style &= ~win32con.WS_CAPTION
+                        
+                        # Apply border style if set
+                        border_style = self.border_styles.get(process_name, "no_change")
+                        if border_style != "no_change":
+                            # Clear existing border styles
+                            style &= ~(win32con.WS_BORDER | win32con.WS_THICKFRAME | win32con.WS_DLGFRAME)
+                            
+                            # Apply new border style
+                            if border_style == "normal":
+                                style |= (win32con.WS_THICKFRAME | win32con.WS_BORDER)
+                            elif border_style == "thin":
+                                style |= win32con.WS_BORDER
+                            elif border_style == "dialog":
+                                style |= win32con.WS_DLGFRAME
+                            elif border_style == "tool":
+                                style |= win32con.WS_BORDER
+                                style &= ~(win32con.WS_MAXIMIZEBOX | win32con.WS_MINIMIZEBOX)
+                        
+                        # Apply the combined style
+                        win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
+                        win32gui.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
+                                            win32con.SWP_NOMOVE | 
+                                            win32con.SWP_NOSIZE | 
+                                            win32con.SWP_NOZORDER |
+                                            win32con.SWP_FRAMECHANGED)
                 except:
                     pass  # Ignore errors for inaccessible windows
                 return True
@@ -281,6 +366,234 @@ class AppState:
         
         # Schedule next check
         self.root.after(1000, self.check_title_bars)
+
+    def save_maximize_app(self, app_name, should_maximize):
+        """Save maximize setting for specific app"""
+        if should_maximize and app_name not in self.maximize_apps:
+            self.maximize_apps.append(app_name)
+        elif not should_maximize and app_name in self.maximize_apps:
+            self.maximize_apps.remove(app_name)
+            # Restore windows when disabling maximize
+            self.restore_windows(app_name)
+        
+        self.config["MAXIMIZE_APPS"] = self.maximize_apps
+        self.save_config()
+
+    def restore_windows(self, app_name):
+        """Restore windows for all instances of given app"""
+        try:
+            def enum_windows_callback(hwnd, _):
+                try:
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    process = psutil.Process(pid)
+                    process_name = os.path.basename(process.exe())
+                    
+                    if process_name == app_name:
+                        # Check if window is visible and maximized
+                        if win32gui.IsWindowVisible(hwnd) and not win32gui.IsIconic(hwnd):
+                            placement = win32gui.GetWindowPlacement(hwnd)
+                            if placement[1] == win32con.SW_SHOWMAXIMIZED:
+                                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                except:
+                    pass  # Ignore errors for inaccessible windows
+                return True
+
+            win32gui.EnumWindows(enum_windows_callback, None)
+        except Exception as e:
+            print(f"Error restoring windows: {e}")
+
+    def check_window_states(self):
+        """Check and manage window states"""
+        try:
+            def enum_windows_callback(hwnd, _):
+                try:
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    process = psutil.Process(pid)
+                    process_name = os.path.basename(process.exe())
+                    
+                    # Handle custom resolutions
+                    if process_name in self.custom_resolution_apps:
+                        if win32gui.IsWindowVisible(hwnd) and not win32gui.IsIconic(hwnd):
+                            placement = win32gui.GetWindowPlacement(hwnd)
+                            if placement[1] != win32con.SW_SHOWMAXIMIZED:  # Only resize if not maximized
+                                settings = self.custom_resolution_apps[process_name]
+                                
+                                # Debug window info
+                                print(f"\nWindow debug for {process_name}:")
+                                print(f"  Window handle: {hwnd}")
+                                
+                                # Ensure process is DPI aware
+                                try:
+                                    user32 = ctypes.windll.user32
+                                    process_handle = win32api.OpenProcess(win32con.PROCESS_ALL_ACCESS, False, pid)
+                                    user32.SetProcessDpiAwarenessContext(process_handle, -4)  # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+                                except:
+                                    user32.SetProcessDPIAware()  # Fallback
+                                
+                                # Get DPI-aware screen dimensions
+                                monitor = win32api.MonitorFromWindow(hwnd, win32con.MONITOR_DEFAULTTONEAREST)
+                                monitor_info = win32api.GetMonitorInfo(monitor)
+                                work_area = monitor_info['Work']
+                                screen_width = work_area[2] - work_area[0]
+                                screen_height = work_area[3] - work_area[1]
+                                
+                                # Get target dimensions
+                                target_width = settings["width"]
+                                target_height = settings["height"]
+
+                                # Handle "fit to screen" options
+                                if isinstance(target_width, str) and target_width.startswith("fit_"):
+                                    aspect_ratio = target_width.split("_", 1)[1]
+                                    if aspect_ratio == "16_9":
+                                        ratio = 16/9
+                                    elif aspect_ratio == "19_5_9":
+                                        ratio = 19.5/9
+                                    elif aspect_ratio == "21_9":
+                                        ratio = 21/9
+                                    elif aspect_ratio == "32_9":
+                                        ratio = 32/9
+                                    
+                                    # Calculate dimensions that fit the screen while maintaining aspect ratio
+                                    if (screen_width/screen_height) > ratio:
+                                        # Screen is wider than target ratio, fit to height
+                                        target_height = screen_height
+                                        target_width = int(screen_height * ratio)
+                                    else:
+                                        # Screen is taller than target ratio, fit to width
+                                        target_width = screen_width
+                                        target_height = int(screen_width / ratio)
+                                
+                                # Get placement and calculate position
+                                placement = self.window_placements.get(process_name, "center")
+                                x, y = self.get_window_position(placement, screen_width, screen_height, 
+                                                             target_width, target_height)
+                                
+                                # Use current position if placement is "no_change"
+                                if x is None or y is None:
+                                    rect = win32gui.GetWindowRect(hwnd)
+                                    x, y = rect[0], rect[1]
+                                
+                                print(f"  Screen size: {screen_width}x{screen_height}")
+                                print(f"  Target size: {target_width}x{target_height}")
+                                print(f"  Placement: {placement}")
+                                print(f"  Position: {x},{y}")
+                                
+                                try:
+                                    # Set window size and position
+                                    result = win32gui.MoveWindow(hwnd, x, y, target_width, target_height, True)
+                                    print(f"  MoveWindow result: {result}")
+                                    
+                                    # Apply border style
+                                    border_style = self.border_styles.get(process_name, "no_change")
+                                    self.apply_window_style(hwnd, border_style)
+                                    
+                                    # Verify final state
+                                    new_rect = win32gui.GetWindowRect(hwnd)
+                                    print(f"  New window rect: {new_rect}")
+                                except Exception as e:
+                                    print(f"  Error updating window: {e}")
+                except Exception as e:
+                    print(f"Window callback error: {e}")
+                return True
+
+            win32gui.EnumWindows(enum_windows_callback, None)
+        except Exception as e:
+            print(f"Error checking window states: {e}")
+        
+        self.root.after(1000, self.check_window_states)
+
+    def save_custom_resolution(self, app_name, enabled, preset=None):
+        """Save custom resolution setting for specific app"""
+        if enabled and preset in self.RESOLUTION_PRESETS:
+            self.custom_resolution_apps[app_name] = self.RESOLUTION_PRESETS[preset]
+        elif app_name in self.custom_resolution_apps:
+            del self.custom_resolution_apps[app_name]
+        
+        self.config["CUSTOM_RESOLUTION_APPS"] = self.custom_resolution_apps
+        self.save_config()
+
+    def save_window_placement(self, app_name, placement):
+        """Save window placement setting for specific app"""
+        if placement in self.WINDOW_PLACEMENTS.values():
+            self.window_placements[app_name] = placement
+        elif app_name in self.window_placements:
+            del self.window_placements[app_name]
+        
+        self.config["WINDOW_PLACEMENTS"] = self.window_placements
+        self.save_config()
+
+    def save_border_style(self, app_name, style):
+        """Save border style setting for specific app"""
+        if style in self.BORDER_STYLES.values():
+            self.border_styles[app_name] = style
+        elif app_name in self.border_styles:
+            del self.border_styles[app_name]
+        
+        self.config["BORDER_STYLES"] = self.border_styles
+        self.save_config()
+
+    def apply_window_style(self, hwnd, style_name):
+        """Apply window border style"""
+        if style_name == "no_change":
+            return
+            
+        # Get current style
+        style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+        
+        # Store caption state
+        has_caption = style & win32con.WS_CAPTION
+        
+        # Clear existing border styles but preserve other styles
+        style &= ~(win32con.WS_BORDER | win32con.WS_THICKFRAME | win32con.WS_DLGFRAME)
+        
+        # Restore caption if it was present
+        if has_caption:
+            style |= win32con.WS_CAPTION
+        
+        # Apply new style
+        if style_name == "normal":
+            style |= win32con.WS_OVERLAPPEDWINDOW
+        elif style_name == "thin":
+            style |= win32con.WS_BORDER
+        elif style_name == "none":
+            pass  # No border
+        elif style_name == "dialog":
+            style |= win32con.WS_DLGFRAME
+        elif style_name == "tool":
+            style |= win32con.WS_BORDER
+            style &= ~(win32con.WS_MAXIMIZEBOX | win32con.WS_MINIMIZEBOX)
+        
+        # Apply style
+        win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
+        win32gui.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
+                            win32con.SWP_NOMOVE | 
+                            win32con.SWP_NOSIZE | 
+                            win32con.SWP_NOZORDER |
+                            win32con.SWP_FRAMECHANGED)
+
+    def get_window_position(self, placement, screen_width, screen_height, window_width, window_height):
+        """Calculate window position based on placement setting"""
+        if placement == "no_change":
+            return None, None
+        elif placement == "center":
+            return (screen_width - window_width) // 2, (screen_height - window_height) // 2
+        elif placement == "top":
+            return (screen_width - window_width) // 2, 0
+        elif placement == "bottom":
+            return (screen_width - window_width) // 2, screen_height - window_height
+        elif placement == "left":
+            return 0, (screen_height - window_height) // 2
+        elif placement == "right":
+            return screen_width - window_width, (screen_height - window_height) // 2
+        elif placement == "top_left":
+            return 0, 0
+        elif placement == "top_right":
+            return screen_width - window_width, 0
+        elif placement == "bottom_left":
+            return 0, screen_height - window_height
+        elif placement == "bottom_right":
+            return screen_width - window_width, screen_height - window_height
+        return None, None
 
 class VolumeControlWindow:
     def __init__(self, parent, app_state):
@@ -311,6 +624,11 @@ class VolumeControlWindow:
         self.mute_labels = {}
         self.volume_labels = {}
         self.hide_titlebar_vars = {}  # Add hide titlebar vars
+        self.maximize_vars = {}  # Add maximize vars
+        self.resolution_vars = {}
+        self.preset_vars = {}  # Store resolution preset StringVars
+        self.placement_vars = {}  # Store placement StringVars
+        self.border_vars = {}  # Add border style vars
         self.update_app_list()
         
         # Start periodic status updates
@@ -401,6 +719,105 @@ class VolumeControlWindow:
                            selectcolor=app_state.theme['button'],
                            activebackground=app_state.theme['bg'],
                            command=lambda a=app_name: self.on_hide_titlebar_change(a)).pack(side='left', padx=5)
+
+                # Maximize checkbox
+                maximize_var = IntVar(value=1 if app_name in app_state.maximize_apps else 0)
+                self.maximize_vars[app_name] = maximize_var
+                
+                Checkbutton(frame, text="Maximize",
+                           variable=maximize_var,
+                           bg=app_state.theme['bg'],
+                           fg=app_state.theme['fg'],
+                           selectcolor=app_state.theme['button'],
+                           activebackground=app_state.theme['bg'],
+                           command=lambda a=app_name: self.on_maximize_change(a)).pack(side='left', padx=5)
+                
+                # Custom resolution frame
+                resolution_frame = Frame(frame, bg=app_state.theme['bg'])
+                resolution_frame.pack(side='left', padx=5)
+                
+                # Resolution checkbox and dropdown
+                has_custom = app_name in app_state.custom_resolution_apps
+                resolution_var = IntVar(value=1 if has_custom else 0)
+                self.resolution_vars[app_name] = resolution_var
+                
+                # Get current preset based on saved dimensions
+                current_dims = app_state.custom_resolution_apps.get(app_name, {})
+                current_preset = "1080p"  # default
+                for preset, dims in app_state.RESOLUTION_PRESETS.items():
+                    if dims == current_dims:
+                        current_preset = preset
+                
+                preset_var = StringVar(value=current_preset)
+                self.preset_vars[app_name] = preset_var
+                
+                Checkbutton(resolution_frame, text="Resolution:",
+                           variable=resolution_var,
+                           bg=app_state.theme['bg'],
+                           fg=app_state.theme['fg'],
+                           selectcolor=app_state.theme['button'],
+                           activebackground=app_state.theme['bg'],
+                           command=lambda a=app_name: self.on_resolution_change(a)).pack(side='left')
+                
+                # Resolution preset dropdown
+                resolution_menu = OptionMenu(resolution_frame, preset_var, 
+                                          "16:9 720p", "16:9 1080p", "16:9 1440p", "16:9 4K", "16:9 Fit Screen",
+                                          "19.5:9 720p", "19.5:9 1080p", "19.5:9 1440p", "19.5:9 Fit Screen",
+                                          "21:9 720p", "21:9 1080p", "21:9 1440p", "21:9 Fit Screen",
+                                          "32:9 720p", "32:9 1080p", "32:9 Fit Screen",
+                                          command=lambda *args, a=app_name: self.on_resolution_change(a))
+                resolution_menu.config(bg=app_state.theme['button'],
+                                    fg=app_state.theme['fg'],
+                                    activebackground=app_state.theme['active'])
+                resolution_menu["menu"].config(bg=app_state.theme['button'],
+                                            fg=app_state.theme['fg'])
+                resolution_menu.pack(side='left', padx=2)
+                
+                # Window placement dropdown
+                placement_frame = Frame(frame, bg=app_state.theme['bg'])
+                placement_frame.pack(side='left', padx=5)
+                
+                Label(placement_frame, text="Position:",
+                      bg=app_state.theme['bg'],
+                      fg=app_state.theme['fg']).pack(side='left')
+                
+                current_placement = app_state.window_placements.get(app_name, "center")
+                placement_var = StringVar(value=[k for k, v in app_state.WINDOW_PLACEMENTS.items() 
+                                               if v == current_placement][0])
+                self.placement_vars[app_name] = placement_var
+                
+                placement_menu = OptionMenu(placement_frame, placement_var, 
+                                          *app_state.WINDOW_PLACEMENTS.keys(),
+                                          command=lambda *args, a=app_name: self.on_placement_change(a))
+                placement_menu.config(bg=app_state.theme['button'],
+                                   fg=app_state.theme['fg'],
+                                   activebackground=app_state.theme['active'])
+                placement_menu["menu"].config(bg=app_state.theme['button'],
+                                           fg=app_state.theme['fg'])
+                placement_menu.pack(side='left', padx=2)
+                
+                # Border style dropdown
+                border_frame = Frame(frame, bg=app_state.theme['bg'])
+                border_frame.pack(side='left', padx=5)
+                
+                Label(border_frame, text="Border:",
+                      bg=app_state.theme['bg'],
+                      fg=app_state.theme['fg']).pack(side='left')
+                
+                current_style = app_state.border_styles.get(app_name, "no_change")
+                border_var = StringVar(value=[k for k, v in app_state.BORDER_STYLES.items() 
+                                            if v == current_style][0])
+                self.border_vars[app_name] = border_var
+                
+                border_menu = OptionMenu(border_frame, border_var, 
+                                       *app_state.BORDER_STYLES.keys(),
+                                       command=lambda *args, a=app_name: self.on_border_change(a))
+                border_menu.config(bg=app_state.theme['button'],
+                                 fg=app_state.theme['fg'],
+                                 activebackground=app_state.theme['active'])
+                border_menu["menu"].config(bg=app_state.theme['button'],
+                                         fg=app_state.theme['fg'])
+                border_menu.pack(side='left', padx=2)
                 
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
@@ -415,6 +832,25 @@ class VolumeControlWindow:
     def on_hide_titlebar_change(self, app_name):
         should_hide = bool(self.hide_titlebar_vars[app_name].get())
         app_state.save_hide_titlebar_app(app_name, should_hide)
+
+    def on_maximize_change(self, app_name):
+        should_maximize = bool(self.maximize_vars[app_name].get())
+        app_state.save_maximize_app(app_name, should_maximize)
+
+    def on_resolution_change(self, app_name):
+        enabled = bool(self.resolution_vars[app_name].get())
+        preset = self.preset_vars[app_name].get() if enabled else None
+        app_state.save_custom_resolution(app_name, enabled, preset)
+
+    def on_placement_change(self, app_name):
+        placement_name = self.placement_vars[app_name].get()
+        placement = app_state.WINDOW_PLACEMENTS[placement_name]
+        app_state.save_window_placement(app_name, placement)
+
+    def on_border_change(self, app_name):
+        style_name = self.border_vars[app_name].get()
+        style = app_state.BORDER_STYLES[style_name]
+        app_state.save_border_style(app_name, style)
 
     def update_mute_status(self):
         """Update mute status and volume for all apps"""
