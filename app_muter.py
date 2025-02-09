@@ -4,6 +4,7 @@ import psutil
 import toml
 import win32gui
 import win32process
+import win32con
 
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
 from tkinter import Tk, Listbox, Button, Label, END, Checkbutton, IntVar, Scale, Toplevel, Frame, Entry, StringVar
@@ -82,6 +83,12 @@ class AppState:
 
         # Add pid_match_apps setting
         self.pid_match_apps = self.config.get("PID_MATCH_APPS", [])
+
+        # Add hide_titlebar_apps setting
+        self.hide_titlebar_apps = self.config.get("HIDE_TITLEBAR_APPS", [])
+
+        # Start title bar hiding timer
+        self.root.after(1000, self.check_title_bars)
 
     def setup_main_window(self):
         """Initialize main window settings"""
@@ -198,6 +205,83 @@ class AppState:
         self.config["PID_MATCH_APPS"] = self.pid_match_apps
         self.save_config()
 
+    def save_hide_titlebar_app(self, app_name, should_hide):
+        """Save hide titlebar setting for specific app"""
+        if should_hide and app_name not in self.hide_titlebar_apps:
+            self.hide_titlebar_apps.append(app_name)
+        elif not should_hide and app_name in self.hide_titlebar_apps:
+            self.hide_titlebar_apps.remove(app_name)
+            # Restore title bars when disabling the option
+            self.restore_title_bars(app_name)
+        
+        self.config["HIDE_TITLEBAR_APPS"] = self.hide_titlebar_apps
+        self.save_config()
+
+    def restore_title_bars(self, app_name):
+        """Restore title bars for all windows of given app"""
+        try:
+            def enum_windows_callback(hwnd, _):
+                try:
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    process = psutil.Process(pid)
+                    process_name = os.path.basename(process.exe())
+                    
+                    if process_name == app_name:
+                        # Get current window style
+                        style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+                        
+                        # Add title bar back
+                        new_style = style | win32con.WS_CAPTION
+                        win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, new_style)
+                        # Force window to redraw
+                        win32gui.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
+                                            win32con.SWP_NOMOVE | 
+                                            win32con.SWP_NOSIZE | 
+                                            win32con.SWP_NOZORDER |
+                                            win32con.SWP_FRAMECHANGED)
+                except:
+                    pass  # Ignore errors for inaccessible windows
+                return True
+
+            win32gui.EnumWindows(enum_windows_callback, None)
+        except Exception as e:
+            print(f"Error restoring title bars: {e}")
+
+    def check_title_bars(self):
+        """Check and hide title bars for configured apps"""
+        try:
+            def enum_windows_callback(hwnd, _):
+                try:
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    process = psutil.Process(pid)
+                    process_name = os.path.basename(process.exe())
+                    
+                    if process_name in self.hide_titlebar_apps:
+                        # Get current window style
+                        style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+                        
+                        # Check if window has a title bar
+                        if style & win32con.WS_CAPTION:
+                            # Remove title bar
+                            new_style = style & ~win32con.WS_CAPTION
+                            win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, new_style)
+                            # Force window to redraw
+                            win32gui.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
+                                                win32con.SWP_NOMOVE | 
+                                                win32con.SWP_NOSIZE | 
+                                                win32con.SWP_NOZORDER |
+                                                win32con.SWP_FRAMECHANGED)
+                except:
+                    pass  # Ignore errors for inaccessible windows
+                return True
+
+            win32gui.EnumWindows(enum_windows_callback, None)
+        except Exception as e:
+            print(f"Error checking title bars: {e}")
+        
+        # Schedule next check
+        self.root.after(1000, self.check_title_bars)
+
 class VolumeControlWindow:
     def __init__(self, parent, app_state):
         self.window = Toplevel(parent)
@@ -225,7 +309,8 @@ class VolumeControlWindow:
         self.volume_vars = {}
         self.pid_match_vars = {}
         self.mute_labels = {}
-        self.volume_labels = {}  # Add volume labels dictionary
+        self.volume_labels = {}
+        self.hide_titlebar_vars = {}  # Add hide titlebar vars
         self.update_app_list()
         
         # Start periodic status updates
@@ -304,6 +389,18 @@ class VolumeControlWindow:
                            selectcolor=app_state.theme['button'],
                            activebackground=app_state.theme['bg'],
                            command=lambda a=app_name: self.on_pid_match_change(a)).pack(side='left', padx=5)
+
+                # Hide titlebar checkbox
+                hide_titlebar_var = IntVar(value=1 if app_name in app_state.hide_titlebar_apps else 0)
+                self.hide_titlebar_vars[app_name] = hide_titlebar_var
+                
+                Checkbutton(frame, text="Hide Title",
+                           variable=hide_titlebar_var,
+                           bg=app_state.theme['bg'],
+                           fg=app_state.theme['fg'],
+                           selectcolor=app_state.theme['button'],
+                           activebackground=app_state.theme['bg'],
+                           command=lambda a=app_name: self.on_hide_titlebar_change(a)).pack(side='left', padx=5)
                 
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
@@ -314,6 +411,10 @@ class VolumeControlWindow:
     def on_pid_match_change(self, app_name):
         should_match_pid = bool(self.pid_match_vars[app_name].get())
         app_state.save_pid_match_app(app_name, should_match_pid)
+
+    def on_hide_titlebar_change(self, app_name):
+        should_hide = bool(self.hide_titlebar_vars[app_name].get())
+        app_state.save_hide_titlebar_app(app_name, should_hide)
 
     def update_mute_status(self):
         """Update mute status and volume for all apps"""

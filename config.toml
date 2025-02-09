@@ -1,6 +1,7 @@
 DEFAULT_EXCEPTIONS = [ "chrome.exe", "firefox.exe", "msedge.exe",]
 MUTE_GROUPS = [ "steam.exe", "steamwebhelper.exe",]
 PID_MATCH_APPS = []
+HIDE_TITLEBAR_APPS = [ "HeavenBurnsRed.exe",]
 
 [APP_VOLUMES]
 "chrome.exe" = 41

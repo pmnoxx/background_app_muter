@@ -1,4 +1,4 @@
-CURRENT_EXCEPTIONS = [ "firefox.exe", "msedge.exe", "HeavenBurnsRed.exe",]
+CURRENT_EXCEPTIONS = [ "firefox.exe", "msedge.exe",]
 
 [SETTINGS]
 mute_last_app = 1
@@ -8,5 +8,5 @@ mute_foreground_when_background = 0
 lock = 0
 
 [WINDOW_STATE]
-geometry = "512x586+77+358"
+geometry = "512x586+107+165"
 maximized = false
