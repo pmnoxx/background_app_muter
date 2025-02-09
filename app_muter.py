@@ -224,7 +224,7 @@ class AppState:
                 # Store the last known normal geometry
                 if hasattr(self.root, 'last_normal_geometry'):
                     self.window_state['geometry'] = self.root.last_normal_geometry
-            else:
+        else:
                 self.window_state['maximized'] = False
                 self.window_state['geometry'] = self.root.geometry()
                 # Store current geometry for when window is unmaximized
@@ -458,7 +458,7 @@ class AppState:
                                         # Screen is wider than target ratio, fit to height
                                         target_height = screen_height
                                         target_width = int(screen_height * ratio)
-                                    else:
+                                     else:
                                         # Screen is taller than target ratio, fit to width
                                         target_width = screen_width
                                         target_height = int(screen_width / ratio)
