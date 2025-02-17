@@ -1,7 +1,7 @@
-pywin32
-pycaw
-psutil
-comtypes
-keyboard
-pyuac
-toml
+psutil>=5.9.0
+pywin32>=305
+toml>=0.10.2
+pycaw>=20230407
+pyuac>=0.0.3
+pillow>=10.0.0
+pyinstaller>=6.0.0

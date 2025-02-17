@@ -8,9 +8,11 @@ import win32con
 import win32ui
 import ctypes
 import win32api
+import pyuac
+import time
+from tkinter import Tk, Listbox, Button, Label, END, Checkbutton, IntVar, Scale, Toplevel, Frame, Entry, StringVar, OptionMenu, LabelFrame, messagebox
 
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
-from tkinter import Tk, Listbox, Button, Label, END, Checkbutton, IntVar, Scale, Toplevel, Frame, Entry, StringVar, OptionMenu
 
 def read_config(filename):
     try:
@@ -26,6 +28,9 @@ def read_config(filename):
 
 class AppState:
     def __init__(self):
+        # Add version constant
+        self.VERSION = "1.0.0"
+        
         # Create main window first
         self.root = Tk()
         
@@ -95,6 +100,7 @@ class AppState:
 
         # Define resolution presets by aspect ratio
         self.RESOLUTION_PRESETS = {
+            "8k": {"width": 7680, "height": 4320},
             # 16:9 options
             "16:9 720p": {"width": 1280, "height": 720},
             "16:9 1080p": {"width": 1920, "height": 1080},
@@ -113,11 +119,17 @@ class AppState:
             "21:9 1080p": {"width": 2560, "height": 1080},
             "21:9 1440p": {"width": 3440, "height": 1440},
             "21:9 Fit Screen": {"width": "fit_21_9", "height": "fit_21_9"},
+
+            # 24:9 options
+            "24:9 720p": {"width": 1920, "height": 720},
+            "24:9 1080p": {"width": 2880, "height": 1080},
+            "24:9 1440p": {"width": 3840, "height": 1440},
+            "24:9 Fit Screen": {"width": "fit_24_9", "height": "fit_24_9"},
             
             # 32:9 options
             "32:9 720p": {"width": 2560, "height": 720},
             "32:9 1080p": {"width": 3840, "height": 1080},
-            "32:9 Fit Screen": {"width": "fit_32_9", "height": "fit_32_9"}
+            "32:9 Fit Screen": {"width": "fit_32_9", "height": "fit_32_9"},
         }
         
         # Add custom resolution settings
@@ -153,18 +165,48 @@ class AppState:
         # Add border style settings
         self.border_styles = self.config.get("BORDER_STYLES", {})
 
-        # Start title bar hiding timer
-        self.root.after(1000, self.check_title_bars)
+        # Add options settings
+        self.options = self.config.get("OPTIONS", {
+            "window_check_interval": 1000,  # milliseconds
+            "volume_check_interval": 100,   # milliseconds
+            "list_update_interval": 100,    # milliseconds
+            "debug_mode": False,
+        })
 
-        # Start window state checks
-        self.root.after(1000, self.check_window_states)
+        # Add startup delay settings
+        self.startup_delays = self.config.get("STARTUP_DELAYS", {})
+        self.app_start_times = {}  # Track when apps were first seen
+
+        # Start combined window state checks
+        self.root.after(self.options["window_check_interval"], self.check_all_window_states)
 
     def setup_main_window(self):
         """Initialize main window settings"""
-        self.root.title("App Muter")
+        self.root.title(f"App Muter v{self.VERSION}")
         self.root.configure(bg=self.theme['bg'])
-        self.root.minsize(self.window['min_width'], self.window['min_height'])
         
+        # Set unique app ID and icon for Windows taskbar
+        try:
+            import ctypes
+            myappid = 'mycompany.appmuter.subversion.1'
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+            
+            # Load icon for both window and taskbar
+            icon_path = self.ensure_app_icon()
+            if icon_path:
+                from PIL import Image, ImageTk
+                icon = Image.open(icon_path)
+                # Convert to PhotoImage for window icon
+                photo = ImageTk.PhotoImage(icon)
+                self.root.iconphoto(True, photo)
+                # Convert to ICO for taskbar
+                icon_ico = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_icon.ico")
+                if not os.path.exists(icon_ico):
+                    icon.save(icon_ico, format='ICO', sizes=[(256, 256)])
+                self.root.iconbitmap(icon_ico)
+        except Exception as e:
+            print(f"Error setting app ID/icon: {e}")
+            
         # Center window
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
@@ -174,6 +216,69 @@ class AppState:
         
         # Bind window events
         self.root.bind("<Configure>", lambda e: self.save_window_state())
+
+    def ensure_app_icon(self):
+        """Generate and save app icon if it doesn't exist"""
+        try:
+            from PIL import Image, ImageDraw
+            
+            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_icon.png")
+            
+            # Only generate if icon doesn't exist
+            if not os.path.exists(icon_path):
+                # Create base image with transparency
+                size = 256
+                image = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+                draw = ImageDraw.Draw(image)
+                
+                # Define colors
+                bg_color = '#2b2b2b'
+                fg_color = '#4b6eaf'
+                
+                # Draw main circle
+                padding = size * 0.1
+                circle_bbox = [padding, padding, size-padding, size-padding]
+                draw.ellipse(circle_bbox, fill=bg_color)
+                
+                # Draw speaker symbol
+                speaker_size = size * 0.4
+                speaker_x = size * 0.3
+                speaker_y = size * 0.3
+                
+                # Speaker box
+                box_points = [
+                    (speaker_x, speaker_y),
+                    (speaker_x + speaker_size*0.4, speaker_y),
+                    (speaker_x + speaker_size*0.8, speaker_y - speaker_size*0.2),
+                    (speaker_x + speaker_size*0.8, speaker_y + speaker_size*1.2),
+                    (speaker_x + speaker_size*0.4, speaker_y + speaker_size),
+                    (speaker_x, speaker_y + speaker_size),
+                ]
+                draw.polygon(box_points, fill=fg_color)
+                
+                # Sound waves
+                wave_x = speaker_x + speaker_size*0.9
+                wave_y = speaker_y + speaker_size*0.5
+                wave_radius = speaker_size * 0.2
+                
+                for i in range(3):
+                    draw.arc([wave_x + i*wave_radius, wave_y - wave_radius,
+                             wave_x + wave_radius + i*wave_radius, wave_y + wave_radius],
+                            -60, 60, fill=fg_color, width=int(size*0.02))
+                
+                # Draw mute line
+                line_width = int(size*0.04)
+                draw.line([(size*0.2, size*0.8), (size*0.8, size*0.2)], 
+                         fill='#ff6b6b', width=line_width)
+                
+                # Save as PNG
+                image.save(icon_path, format='PNG')
+            
+            return icon_path
+            
+        except Exception as e:
+            print(f"Error generating icon: {e}")
+            return None
 
     def save_exceptions(self):
         """Save exceptions to runtime file"""
@@ -317,8 +422,8 @@ class AppState:
         except Exception as e:
             print(f"Error restoring title bars: {e}")
 
-    def check_title_bars(self):
-        """Check and hide title bars for configured apps"""
+    def check_all_window_states(self):
+        """Check and manage all window states (title bars, borders, sizes)"""
         try:
             def enum_windows_callback(hwnd, _):
                 try:
@@ -326,20 +431,40 @@ class AppState:
                     process = psutil.Process(pid)
                     process_name = os.path.basename(process.exe())
                     
+                    # Track first time we see this app
+                    current_time = time.time()
+                    if process_name not in self.app_start_times:
+                        self.app_start_times[process_name] = current_time
+                    
+                    # Check if we need to wait before resizing
+                    startup_delay = self.startup_delays.get(process_name, 0)
+                    if startup_delay > 0:
+                        time_since_start = current_time - self.app_start_times[process_name]
+                        if time_since_start < startup_delay:
+                            if self.options["debug_mode"]:
+                                print(f"Waiting {startup_delay - time_since_start:.1f}s before resizing {process_name}")
+                            return True
+                    
+                    # Track if we need to update window
+                    needs_update = False
+                    needs_style_update = False
+                    update_flags = win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE
+                    x = y = width = height = 0
+                    
+                    # Get current style once
+                    style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+                    original_style = style
+                    
+                    # Handle title bars and borders
                     if process_name in self.hide_titlebar_apps:
-                        # Get current window style
-                        style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
-                        
-                        # Remove title bar but preserve border style
                         style &= ~win32con.WS_CAPTION
+                        needs_style_update = True
                         
                         # Apply border style if set
                         border_style = self.border_styles.get(process_name, "no_change")
                         if border_style != "no_change":
-                            # Clear existing border styles
                             style &= ~(win32con.WS_BORDER | win32con.WS_THICKFRAME | win32con.WS_DLGFRAME)
                             
-                            # Apply new border style
                             if border_style == "normal":
                                 style |= (win32con.WS_THICKFRAME | win32con.WS_BORDER)
                             elif border_style == "thin":
@@ -349,101 +474,44 @@ class AppState:
                             elif border_style == "tool":
                                 style |= win32con.WS_BORDER
                                 style &= ~(win32con.WS_MAXIMIZEBOX | win32con.WS_MINIMIZEBOX)
-                        
-                        # Apply the combined style
-                        win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
-                        win32gui.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
-                                            win32con.SWP_NOMOVE | 
-                                            win32con.SWP_NOSIZE | 
-                                            win32con.SWP_NOZORDER |
-                                            win32con.SWP_NOACTIVATE |
-                                            win32con.SWP_FRAMECHANGED)
-                except:
-                    pass  # Ignore errors for inaccessible windows
-                return True
-
-            win32gui.EnumWindows(enum_windows_callback, None)
-        except Exception as e:
-            print(f"Error checking title bars: {e}")
-        
-        # Schedule next check
-        self.root.after(1000, self.check_title_bars)
-
-    def save_maximize_app(self, app_name, should_maximize):
-        """Save maximize setting for specific app"""
-        if should_maximize and app_name not in self.maximize_apps:
-            self.maximize_apps.append(app_name)
-        elif not should_maximize and app_name in self.maximize_apps:
-            self.maximize_apps.remove(app_name)
-            # Restore windows when disabling maximize
-            self.restore_windows(app_name)
-        
-        self.config["MAXIMIZE_APPS"] = self.maximize_apps
-        self.save_config()
-
-    def restore_windows(self, app_name):
-        """Restore windows for all instances of given app"""
-        try:
-            def enum_windows_callback(hwnd, _):
-                try:
-                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
-                    process = psutil.Process(pid)
-                    process_name = os.path.basename(process.exe())
                     
-                    if process_name == app_name:
-                        # Check if window is visible and maximized
-                        if win32gui.IsWindowVisible(hwnd) and not win32gui.IsIconic(hwnd):
-                            placement = win32gui.GetWindowPlacement(hwnd)
-                            if placement[1] == win32con.SW_SHOWMAXIMIZED:
-                                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                except:
-                    pass  # Ignore errors for inaccessible windows
-                return True
-
-            win32gui.EnumWindows(enum_windows_callback, None)
-        except Exception as e:
-            print(f"Error restoring windows: {e}")
-
-    def check_window_states(self):
-        """Check and manage window states"""
-        try:
-            def enum_windows_callback(hwnd, _):
-                try:
-                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
-                    process = psutil.Process(pid)
-                    process_name = os.path.basename(process.exe())
+                    # Apply style changes if needed
+                    if needs_style_update and style != original_style:
+                        win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
+                        needs_update = True
+                        update_flags |= win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_FRAMECHANGED
                     
                     # Handle custom resolutions
                     if process_name in self.custom_resolution_apps:
                         if win32gui.IsWindowVisible(hwnd) and not win32gui.IsIconic(hwnd):
                             placement = win32gui.GetWindowPlacement(hwnd)
-                            if placement[1] != win32con.SW_SHOWMAXIMIZED:  # Only resize if not maximized
+                            if placement[1] != win32con.SW_SHOWMAXIMIZED:
                                 settings = self.custom_resolution_apps[process_name]
                                 
                                 # Debug window info
                                 print(f"\nWindow debug for {process_name}:")
                                 print(f"  Window handle: {hwnd}")
                                 
-                                # Ensure process is DPI aware
+                                # Ensure process and window are DPI aware
                                 try:
                                     user32 = ctypes.windll.user32
                                     process_handle = win32api.OpenProcess(win32con.PROCESS_ALL_ACCESS, False, pid)
-                                    user32.SetProcessDpiAwarenessContext(process_handle, -4)  # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+                                    user32.SetProcessDpiAwarenessContext(process_handle, -4)
+                                    win32gui.SetWindowDisplayAffinity(hwnd, 0)
                                 except:
-                                    user32.SetProcessDPIAware()  # Fallback
+                                    user32.SetProcessDPIAware()
                                 
-                                # Get DPI-aware screen dimensions
+                                # Get screen dimensions and calculate size/position
                                 monitor = win32api.MonitorFromWindow(hwnd, win32con.MONITOR_DEFAULTTONEAREST)
                                 monitor_info = win32api.GetMonitorInfo(monitor)
                                 work_area = monitor_info['Work']
                                 screen_width = work_area[2] - work_area[0]
                                 screen_height = work_area[3] - work_area[1]
                                 
-                                # Get target dimensions
+                                # Calculate target dimensions
                                 target_width = settings["width"]
                                 target_height = settings["height"]
-
-                                # Handle "fit to screen" options
+                                
                                 if isinstance(target_width, str) and target_width.startswith("fit_"):
                                     aspect_ratio = target_width.split("_", 1)[1]
                                     if aspect_ratio == "16_9":
@@ -452,48 +520,66 @@ class AppState:
                                         ratio = 19.5/9
                                     elif aspect_ratio == "21_9":
                                         ratio = 21/9
+                                    elif aspect_ratio == "24_9":
+                                        ratio = 24/9
                                     elif aspect_ratio == "32_9":
                                         ratio = 32/9
                                     
                                     # Calculate dimensions that fit the screen while maintaining aspect ratio
-                                    if (screen_width/screen_height) > ratio:
+                                    # Ensure we're using DPI-aware dimensions
+                                    dpi_scale = user32.GetDpiForWindow(hwnd) / 96.0
+                                    scaled_width = int(screen_width / dpi_scale)
+                                    scaled_height = int(screen_height / dpi_scale)
+                                    
+                                    if (scaled_width/scaled_height) > ratio:
                                         # Screen is wider than target ratio, fit to height
-                                        target_height = screen_height
-                                        target_width = int(screen_height * ratio)
+                                        target_height = scaled_height
+                                        target_width = int(scaled_height * ratio)
                                     else:
                                         # Screen is taller than target ratio, fit to width
-                                        target_width = screen_width
-                                        target_height = int(screen_width / ratio)
+                                        target_width = scaled_width
+                                        target_height = int(scaled_width / ratio)
+                                    
+                                    # Scale back to actual pixels
+                                    target_width = int(target_width * dpi_scale)
+                                    target_height = int(target_height * dpi_scale)
                                 
-                                # Get placement and calculate position
+                                # Calculate position
                                 placement = self.window_placements.get(process_name, "center")
-                                x, y = self.get_window_position(placement, screen_width, screen_height, 
-                                                             target_width, target_height)
+                                new_x, new_y = self.get_window_position(placement, screen_width, screen_height, 
+                                                                      target_width, target_height)
                                 
-                                # Use current position if placement is "no_change"
-                                if x is None or y is None:
+                                if new_x is None or new_y is None:
                                     rect = win32gui.GetWindowRect(hwnd)
-                                    x, y = rect[0], rect[1]
+                                    new_x, new_y = rect[0], rect[1]
                                 
-                                print(f"  Screen size: {screen_width}x{screen_height}")
-                                print(f"  Target size: {target_width}x{target_height}")
-                                print(f"  Placement: {placement}")
+                                # Update position and size
+                                x, y = new_x, new_y
+                                width, height = target_width, target_height
+                                needs_update = True
+                                update_flags &= ~(win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
+                                
+                                print(f"  Target size: {width}x{height}")
                                 print(f"  Position: {x},{y}")
+                    
+                    # Apply all window updates at once
+                    if needs_update:
+                        try:
+                            user32.SetWindowPos(hwnd, 0, x, y, width, height, update_flags)
+                            
+                            # Verify size if we changed it
+                            if width > 0 and height > 0:
+                                time.sleep(0.1)
+                                new_rect = win32gui.GetWindowRect(hwnd)
+                                new_width = new_rect[2] - new_rect[0]
+                                new_height = new_rect[3] - new_rect[1]
                                 
-                                try:
-                                    # Set window size and position
-                                    result = win32gui.MoveWindow(hwnd, x, y, target_width, target_height, True)
-                                    print(f"  MoveWindow result: {result}")
-                                    
-                                    # Apply border style
-                                    border_style = self.border_styles.get(process_name, "no_change")
-                                    self.apply_window_style(hwnd, border_style)
-                                    
-                                    # Verify final state
-                                    new_rect = win32gui.GetWindowRect(hwnd)
-                                    print(f"  New window rect: {new_rect}")
-                                except Exception as e:
-                                    print(f"  Error updating window: {e}")
+                                if new_width != width or new_height != height:
+                                    print(f"  Size mismatch, retrying... ({width}x{height} != {new_width}x{new_height})")
+                                    user32.SetWindowPos(hwnd, 0, x, y, width, height, update_flags)
+                        except Exception as e:
+                            print(f"  Error updating window: {e}")
+                    
                 except Exception as e:
                     print(f"Window callback error: {e}")
                 return True
@@ -502,7 +588,8 @@ class AppState:
         except Exception as e:
             print(f"Error checking window states: {e}")
         
-        self.root.after(1000, self.check_window_states)
+        # Schedule next check
+        self.root.after(self.options["window_check_interval"], self.check_all_window_states)
 
     def save_custom_resolution(self, app_name, enabled, preset=None):
         """Save custom resolution setting for specific app"""
@@ -597,6 +684,11 @@ class AppState:
         elif placement == "bottom_right":
             return screen_width - window_width, screen_height - window_height
         return None, None
+
+    def save_options(self):
+        """Save options to config file"""
+        self.config["OPTIONS"] = self.options
+        self.save_config()
 
 class VolumeControlWindow:
     def __init__(self, parent, app_state):
@@ -764,9 +856,11 @@ class VolumeControlWindow:
                 
                 # Resolution preset dropdown
                 resolution_menu = OptionMenu(resolution_frame, preset_var, 
+                                          "8k", 
                                           "16:9 720p", "16:9 1080p", "16:9 1440p", "16:9 4K", "16:9 Fit Screen",
                                           "19.5:9 720p", "19.5:9 1080p", "19.5:9 1440p", "19.5:9 Fit Screen",
                                           "21:9 720p", "21:9 1080p", "21:9 1440p", "21:9 Fit Screen",
+                                          "24:9 720p", "24:9 1080p", "24:9 1440p", "24:9 Fit Screen",
                                           "32:9 720p", "32:9 1080p", "32:9 Fit Screen",
                                           command=lambda *args, a=app_name: self.on_resolution_change(a))
                 resolution_menu.config(bg=app_state.theme['button'],
@@ -821,6 +915,36 @@ class VolumeControlWindow:
                 border_menu["menu"].config(bg=app_state.theme['button'],
                                          fg=app_state.theme['fg'])
                 border_menu.pack(side='left', padx=2)
+                
+                # Add startup delay setting
+                delay_frame = Frame(frame, bg=app_state.theme['bg'])
+                delay_frame.pack(side='left', padx=5)
+                
+                Label(delay_frame, text="Startup Delay (s):",
+                      bg=app_state.theme['bg'],
+                      fg=app_state.theme['fg']).pack(side='left')
+                
+                delay_var = StringVar(value=str(app_state.startup_delays.get(app_name, 0)))
+                delay_entry = Entry(delay_frame, textvariable=delay_var,
+                                  bg=app_state.theme['button'],
+                                  fg=app_state.theme['fg'],
+                                  width=5)
+                delay_entry.pack(side='left', padx=2)
+                
+                def save_delay(event, app=app_name, var=delay_var):
+                    try:
+                        delay = int(var.get())
+                        if delay >= 0:
+                            app_state.startup_delays[app] = delay
+                            app_state.config["STARTUP_DELAYS"] = app_state.startup_delays
+                            app_state.save_config()
+                        else:
+                            var.set("0")
+                    except ValueError:
+                        var.set(str(app_state.startup_delays.get(app, 0)))
+                
+                delay_entry.bind('<Return>', save_delay)
+                delay_entry.bind('<FocusOut>', save_delay)
                 
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
@@ -1102,7 +1226,139 @@ def debug_mute_decision(process_name, process_id, should_be_muted, reason):
         print(f"  Keep last active unmuted: {not app_state.mute_last_app.get()}")
         print(f"  Should be muted: {should_be_muted}")
         print(f"  Reason: {reason}")
+
+class OptionsWindow:
+    def __init__(self, parent, app_state):
+        self.window = Toplevel(parent)
+        self.window.title("Options")
+        self.window.configure(bg=app_state.theme['bg'])
+        
+        # Make window modal
+        self.window.transient(parent)
+        self.window.grab_set()
+        
+        # Create main frame
+        main_frame = Frame(self.window, bg=app_state.theme['bg'])
+        main_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Intervals section
+        intervals_frame = LabelFrame(main_frame, text="Update Intervals", 
+                                   bg=app_state.theme['bg'],
+                                   fg=app_state.theme['fg'])
+        intervals_frame.pack(fill='x', padx=5, pady=5)
+        
+        # Window check interval
+        window_frame = Frame(intervals_frame, bg=app_state.theme['bg'])
+        window_frame.pack(fill='x', padx=5, pady=2)
+        
+        Label(window_frame, text="Window Check Interval (ms):",
+              bg=app_state.theme['bg'],
+              fg=app_state.theme['fg']).pack(side='left')
+        
+        window_var = StringVar(value=str(app_state.options["window_check_interval"]))
+        window_entry = Entry(window_frame, textvariable=window_var,
+                           bg=app_state.theme['button'],
+                           fg=app_state.theme['fg'],
+                           width=10)
+        window_entry.pack(side='right')
+        
+        # Volume check interval
+        volume_frame = Frame(intervals_frame, bg=app_state.theme['bg'])
+        volume_frame.pack(fill='x', padx=5, pady=2)
+        
+        Label(volume_frame, text="Volume Check Interval (ms):",
+              bg=app_state.theme['bg'],
+              fg=app_state.theme['fg']).pack(side='left')
+        
+        volume_var = StringVar(value=str(app_state.options["volume_check_interval"]))
+        volume_entry = Entry(volume_frame, textvariable=volume_var,
+                           bg=app_state.theme['button'],
+                           fg=app_state.theme['fg'],
+                           width=10)
+        volume_entry.pack(side='right')
+        
+        # List update interval
+        list_frame = Frame(intervals_frame, bg=app_state.theme['bg'])
+        list_frame.pack(fill='x', padx=5, pady=2)
+        
+        Label(list_frame, text="List Update Interval (ms):",
+              bg=app_state.theme['bg'],
+              fg=app_state.theme['fg']).pack(side='left')
+        
+        list_var = StringVar(value=str(app_state.options["list_update_interval"]))
+        list_entry = Entry(list_frame, textvariable=list_var,
+                          bg=app_state.theme['button'],
+                          fg=app_state.theme['fg'],
+                          width=10)
+        list_entry.pack(side='right')
+        
+        # Debug mode
+        debug_frame = Frame(main_frame, bg=app_state.theme['bg'])
+        debug_frame.pack(fill='x', padx=5, pady=5)
+        
+        debug_var = IntVar(value=int(app_state.options["debug_mode"]))
+        Checkbutton(debug_frame, text="Debug Mode",
+                   variable=debug_var,
+                   bg=app_state.theme['bg'],
+                   fg=app_state.theme['fg'],
+                   selectcolor=app_state.theme['button'],
+                   activebackground=app_state.theme['bg']).pack(side='left')
+        
+        # Add OCR section
+        ocr_frame = LabelFrame(main_frame, text="OCR Settings", 
+                             bg=app_state.theme['bg'],
+                             fg=app_state.theme['fg'])
+        ocr_frame.pack(fill='x', padx=5, pady=5)
+        
+        # Selection buttons
+        selection_frame = Frame(ocr_frame, bg=app_state.theme['bg'])
+        selection_frame.pack(fill='x', padx=5, pady=2)
+        
+        Button(selection_frame, text="Select Name Area",
+               command=app_state.select_name_area,
+               bg=app_state.theme['button'],
+               fg=app_state.theme['fg'],
+               activebackground=app_state.theme['active']).pack(side='left', padx=5)
+        
+        Button(selection_frame, text="Select Message Area",
+               command=app_state.select_message_area,
+               bg=app_state.theme['button'],
+               fg=app_state.theme['fg'],
+               activebackground=app_state.theme['active']).pack(side='left', padx=5)
+        
+        # Buttons
+        button_frame = Frame(main_frame, bg=app_state.theme['bg'])
+        button_frame.pack(fill='x', pady=10)
+        
+        def save_options():
+            try:
+                app_state.options["window_check_interval"] = int(window_var.get())
+                app_state.options["volume_check_interval"] = int(volume_var.get())
+                app_state.options["list_update_interval"] = int(list_var.get())
+                app_state.options["debug_mode"] = bool(debug_var.get())
+                app_state.save_options()
+                self.window.destroy()
+            except ValueError:
+                messagebox.showerror("Error", "Please enter valid numbers for intervals")
+        
+        Button(button_frame, text="Save",
+               command=save_options,
+               bg=app_state.theme['button'],
+               fg=app_state.theme['fg'],
+               activebackground=app_state.theme['active']).pack(side='right', padx=5)
+        
+        Button(button_frame, text="Cancel",
+               command=self.window.destroy,
+               bg=app_state.theme['button'],
+               fg=app_state.theme['fg'],
+               activebackground=app_state.theme['active']).pack(side='right', padx=5)
+
 if __name__ == "__main__":
+
+    if not pyuac.isUserAdmin():
+        pyuac.runAsAdmin(wait=False)
+        sys.exit(0)
+    
     # Create global state instance
     app_state = AppState()
     app_state.setup_main_window()
@@ -1217,29 +1473,39 @@ if __name__ == "__main__":
                                                    activebackground='#2b2b2b')
     cb_mute_forground_when_background.pack(in_=right_checks, anchor='w', pady=2)
 
-    # Bottom Section (Volume Control Button)
+    # Bottom Section (Volume Control and Options Buttons)
     bottom_frame = Frame(app_state.root, bg=app_state.theme['bg'])
     bottom_frame.pack(fill='x', padx=10, pady=10)
     
     def show_volume_control():
         VolumeControlWindow(app_state.root, app_state)
 
+    def show_options():
+        OptionsWindow(app_state.root, app_state)
+
     btn_volume_control = Button(bottom_frame, text="App Volume Settings",
                               command=show_volume_control,
                               bg=app_state.theme['button'],
                               fg=app_state.theme['fg'],
                               activebackground=app_state.theme['active'])
-    btn_volume_control.pack(in_=bottom_frame, pady=5)
+    btn_volume_control.pack(side='left', pady=5)
+
+    btn_options = Button(bottom_frame, text="Options",
+                        command=show_options,
+                        bg=app_state.theme['button'],
+                        fg=app_state.theme['fg'],
+                        activebackground=app_state.theme['active'])
+    btn_options.pack(side='right', pady=5)
 
     # Schedule the first update of the lists
     app_state.root.after(100, update_lists)
     app_state.root.after(100, mute_unmute_apps)
 
     # Update variable traces
-    app_state.mute_last_app.trace("w", lambda *args: app_state.update_params())
-    app_state.force_mute_fg_var.trace("w", lambda *args: app_state.update_params())
-    app_state.force_mute_bg_var.trace("w", lambda *args: app_state.update_params())
-    app_state.mute_foreground_when_background.trace("w", lambda *args: app_state.update_params())
+    app_state.mute_last_app.trace_add("write", lambda *args: app_state.update_params())
+    app_state.force_mute_fg_var.trace_add("write", lambda *args: app_state.update_params())
+    app_state.force_mute_bg_var.trace_add("write", lambda *args: app_state.update_params())
+    app_state.mute_foreground_when_background.trace_add("write", lambda *args: app_state.update_params())
 
     # Restore window position and size
     app_state.restore_window_state()
