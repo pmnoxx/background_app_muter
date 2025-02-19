@@ -180,6 +180,8 @@ class AppState:
         # Start combined window state checks
         self.root.after(self.options["window_check_interval"], self.check_all_window_states)
 
+        self.volume_control = None  # Add reference to volume control window
+
     def setup_main_window(self):
         """Initialize main window settings"""
         self.root.title(f"App Muter v{self.VERSION}")
@@ -724,6 +726,7 @@ class VolumeControlWindow:
         self.preset_vars = {}  # Store resolution preset StringVars
         self.placement_vars = {}  # Store placement StringVars
         self.border_vars = {}  # Add border style vars
+        self.mute_vars = {}  # Add dictionary to store mute variables
         self.update_app_list()
         
         # Start periodic status updates
@@ -762,6 +765,17 @@ class VolumeControlWindow:
                 # Status frame to hold mute and volume labels
                 status_frame = Frame(frame, bg=app_state.theme['bg'])
                 status_frame.pack(side='left', padx=5)
+                
+                # Add mute checkbox with stored variable
+                mute_var = IntVar(value=0)
+                self.mute_vars[app_name] = mute_var  # Store the mute variable
+                Checkbutton(status_frame, text="Mute",
+                           variable=mute_var,
+                           bg=app_state.theme['bg'],
+                           fg=app_state.theme['fg'],
+                           selectcolor=app_state.theme['button'],
+                           activebackground=app_state.theme['bg'],
+                           command=lambda a=app_name: self.on_mute_change(a)).pack(side='left', padx=5)
                 
                 # Mute status label
                 mute_label = Label(status_frame, text="", width=8,
@@ -979,6 +993,27 @@ class VolumeControlWindow:
         style = app_state.BORDER_STYLES[style_name]
         app_state.save_border_style(app_name, style)
 
+    def on_mute_change(self, app_name):
+        """Handle mute checkbox changes"""
+        should_mute = self.mute_vars[app_name].get()
+        sessions = AudioUtilities.GetAllSessions()
+        for session in sessions:
+            if session.Process:
+                try:
+                    process = psutil.Process(session.ProcessId)
+                    if os.path.basename(process.exe()) == app_name:
+                        volume = session.SimpleAudioVolume
+                        if volume:
+                            volume.SetMute(should_mute, None)
+                            # Add app to exceptions if unmuting
+                            if not should_mute and app_name not in app_state.exceptions_list:
+                                app_state.add_exception(app_name)
+                            # Remove from exceptions if muting
+                            elif should_mute and app_name in app_state.exceptions_list:
+                                app_state.remove_exception(app_name)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
     def update_mute_status(self):
         """Update mute status and volume for all apps"""
         sessions = AudioUtilities.GetAllSessions()
@@ -996,6 +1031,10 @@ class VolumeControlWindow:
                     if volume:
                         is_muted = volume.GetMute()
                         current_volume = int(volume.GetMasterVolume() * 100)
+                        
+                        # Update mute checkbox state
+                        if app_name in self.mute_vars:
+                            self.mute_vars[app_name].set(1 if is_muted else 0)
                         
                         # Update mute status
                         self.mute_labels[app_name].config(
@@ -1096,56 +1135,64 @@ def mute_unmute_apps():
     # Get the list of all the current sessions
     sessions = AudioUtilities.GetAllSessions()
 
+    # First pass - check for audio activity
     non_zero_other = False
     peak_value = 0
     for session in sessions:
         if session.Process:
-            process_id = session.ProcessId
             try:
                 process = psutil.Process(session.ProcessId)
                 process_name = os.path.basename(process.exe())
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                if process_name in app_state.exceptions_list:
+                    volume = session.SimpleAudioVolume
+                    if volume is not None:
+                        audio_meter = session._ctl.QueryInterface(IAudioMeterInformation)
+                        peak_value = audio_meter.GetPeakValue()
+                        if peak_value > 0:
+                            non_zero_other = True
+            except:
                 continue
-
-            # Get the simple audio volume of the session
-            volume = session.SimpleAudioVolume
-
-            # Skip muting Chrome windows
-            if process_name in app_state.exceptions_list:
-                if volume is not None:
-                    audio_meter = session._ctl.QueryInterface(IAudioMeterInformation)
-                    peak_value = audio_meter.GetPeakValue()
-                    if peak_value > 0:
-                        non_zero_other = True
 
     if non_zero_other:
         app_state.zero_cnt = 0
     else:
         app_state.zero_cnt = app_state.zero_cnt + 1
 
+    # Second pass - handle muting
     for session in sessions:
         if not session.Process:
             continue
-        process_id = session.ProcessId
+            
         try:
             process = psutil.Process(session.ProcessId)
             process_name = os.path.basename(process.exe())
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        except:
             continue
 
-        # Get the simple audio volume of the session
         volume = session.SimpleAudioVolume
         if volume is None:
             continue
 
-        # Initialize mute status and reason
+        # Check if app has manual mute override
+        manual_mute = None
+        if hasattr(app_state, 'volume_control') and app_state.volume_control is not None:
+            if process_name in app_state.volume_control.mute_vars:
+                manual_mute = bool(app_state.volume_control.mute_vars[process_name].get())
+
+        # If manual mute is set, respect it
+        if manual_mute is not None:
+            if volume.GetMute() != manual_mute:
+                volume.SetMute(manual_mute, None)
+                reason = "Manual Mute Override"
+                print(f"{'Muted' if manual_mute else 'Unmuted'}({process.pid}): {process_name} - Reason: {reason}")
+            continue
+
+        # Rest of existing muting logic
         should_be_muted = False
         mute_reason = "Unknown"
 
-        # Skip muting Chrome windows
         if process_name in app_state.exceptions_list:
             volume_value = float(app_state.get_app_volume(process_name)) / 100
-
             if volume.GetMute() == 0 and abs(volume.GetMasterVolume() - volume_value) > 0.001:
                 volume.SetMasterVolume(volume_value, None)
 
@@ -1165,30 +1212,25 @@ def mute_unmute_apps():
             elif app_state.mute_foreground_when_background.get() == 1 and app_state.zero_cnt <= 30:
                 should_be_muted = True
                 mute_reason = "Background Audio Playing"
-            elif is_foreground_process(process_id):
-                app_state.last_foreground_app_pid = process_id
+            elif is_foreground_process(process.pid):
+                app_state.last_foreground_app_pid = process.pid
                 # Unmute the audio if it's in the foreground
                 should_be_muted = False
                 mute_reason = "Foreground App"
             else:
                 should_be_muted = True
-                mute_reason = f"Not Foreground App {process_id} {is_foreground_process(process_id)}"
-                if  app_state.mute_last_app.get() and process_id == app_state.last_foreground_app_pid:
+                mute_reason = f"Not Foreground App {process.pid} {is_foreground_process(process.pid)}"
+                if  app_state.mute_last_app.get() and process.pid == app_state.last_foreground_app_pid:
                     if not non_zero_other:
                         should_be_muted = False
                         mute_reason = "Last Active App"
 
-        #if process_name == "chrome.exe":
-        #    debug_mute_decision(process_name, process_id, should_be_muted, mute_reason)
-
         if volume.GetMute() == 0 and should_be_muted:
             volume.SetMute(1, None)
-            reason = mute_reason  # Use tracked reason
-            print(f"Muted({process_id}): {process_name} [{process_name}] PeakValue: {peak_value} - Reason: {reason}")
+            print(f"Muted({process.pid}): {process_name} - Reason: {mute_reason}")
         elif volume.GetMute() == 1 and not should_be_muted:
             volume.SetMute(0, None)
-            reason = mute_reason  # Use tracked reason
-            print(f"Unmuted({process_id}): {process_name} [{process_name}] PeakValue: {peak_value} - Reason: {reason}")
+            print(f"Unmuted({process.pid}): {process_name} - Reason: {mute_reason}")
 
     app_state.to_unmute.clear()
     app_state.root.after(100, mute_unmute_apps)
@@ -1478,7 +1520,7 @@ if __name__ == "__main__":
     bottom_frame.pack(fill='x', padx=10, pady=10)
     
     def show_volume_control():
-        VolumeControlWindow(app_state.root, app_state)
+        app_state.volume_control = VolumeControlWindow(app_state.root, app_state)
 
     def show_options():
         OptionsWindow(app_state.root, app_state)
