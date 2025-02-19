@@ -1,4 +1,4 @@
-CURRENT_EXCEPTIONS = [ "firefox.exe", "msedge.exe", "chrome.exe", "python3.9.exe", "NVIDIA Overlay.exe", "vlc.exe", "Microsoft.Media.Player.exe", "GF2_Exilium.exe",]
+CURRENT_EXCEPTIONS = [ "firefox.exe", "msedge.exe", "chrome.exe", "python3.9.exe", "NVIDIA Overlay.exe", "vlc.exe", "Microsoft.Media.Player.exe",]
 
 [SETTINGS]
 mute_last_app = 0
