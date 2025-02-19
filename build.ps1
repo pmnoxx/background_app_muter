@@ -2,7 +2,7 @@
 $ErrorActionPreference = "Stop"
 
 # Define paths
-$destinationPath = "D:\repos\game_mods\app\App Muter"
+$destinationPath = "D:\repos\game_mods\apps\App Muter"
 $distPath = ".\dist\App Muter"
 
 # Create destination directory if it doesn't exist
