@@ -3,6 +3,7 @@ MUTE_GROUPS = [ "steam.exe", "steamwebhelper.exe",]
 PID_MATCH_APPS = []
 HIDE_TITLEBAR_APPS = [ "StarRail.exe", "GF2_Exilium.exe", "AtelierResleriana.exe", "Ad Fundum.exe", "P3R.exe", "VIRTUA_UNLIMITED_PROJECT.exe", "revolution.exe", "Awaken.exe", "HeavenBurnsRed.exe",]
 MAXIMIZE_APPS = [ "s.exe",]
+ALWAYS_ON_TOP_APPS = []
 
 [BORDER_STYLES]
 "HeavenBurnsRed.exe" = "no_change"

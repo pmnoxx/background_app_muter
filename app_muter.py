@@ -98,6 +98,9 @@ class AppState:
         # Add maximize_apps setting
         self.maximize_apps = self.config.get("MAXIMIZE_APPS", [])
 
+        # Add always on top settings
+        self.always_on_top_apps = self.config.get("ALWAYS_ON_TOP_APPS", [])
+
         # Define resolution presets by aspect ratio
         self.RESOLUTION_PRESETS = {
             "8k": {"width": 7680, "height": 4320},
@@ -564,6 +567,12 @@ class AppState:
                                 print(f"  Target size: {width}x{height}")
                                 print(f"  Position: {x},{y}")
                     
+                    # Handle always on top
+                    if process_name in self.always_on_top_apps:
+                        # Set window to be always on top
+                        win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                                            win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
+                    
                     # Apply all window updates at once
                     if needs_update:
                         try:
@@ -692,6 +701,37 @@ class AppState:
         self.config["OPTIONS"] = self.options
         self.save_config()
 
+    def save_always_on_top_app(self, app_name, should_be_on_top):
+        """Save always on top setting for specific app"""
+        if should_be_on_top and app_name not in self.always_on_top_apps:
+            self.always_on_top_apps.append(app_name)
+        elif not should_be_on_top and app_name in self.always_on_top_apps:
+            self.always_on_top_apps.remove(app_name)
+            # Remove topmost flag when disabling
+            self.remove_always_on_top(app_name)
+        
+        self.config["ALWAYS_ON_TOP_APPS"] = self.always_on_top_apps
+        self.save_config()
+
+    def remove_always_on_top(self, app_name):
+        """Remove always on top flag from app windows"""
+        try:
+            def enum_windows_callback(hwnd, _):
+                try:
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    process = psutil.Process(pid)
+                    if os.path.basename(process.exe()) == app_name:
+                        # Remove TOPMOST flag
+                        win32gui.SetWindowPos(hwnd, win32con.HWND_NOTOPMOST, 0, 0, 0, 0,
+                                            win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
+                except:
+                    pass
+                return True
+
+            win32gui.EnumWindows(enum_windows_callback, None)
+        except Exception as e:
+            print(f"Error removing always on top: {e}")
+
 class VolumeControlWindow:
     def __init__(self, parent, app_state):
         self.window = Toplevel(parent)
@@ -727,6 +767,7 @@ class VolumeControlWindow:
         self.placement_vars = {}  # Store placement StringVars
         self.border_vars = {}  # Add border style vars
         self.mute_vars = {}  # Add dictionary to store mute variables
+        self.always_on_top_vars = {}  # Add always on top vars
         self.update_app_list()
         
         # Start periodic status updates
@@ -960,6 +1001,18 @@ class VolumeControlWindow:
                 delay_entry.bind('<Return>', save_delay)
                 delay_entry.bind('<FocusOut>', save_delay)
                 
+                # Add Always on Top checkbox after the Hide Title checkbox
+                always_on_top_var = IntVar(value=1 if app_name in app_state.always_on_top_apps else 0)
+                self.always_on_top_vars[app_name] = always_on_top_var
+                
+                Checkbutton(frame, text="Always on Top",
+                           variable=always_on_top_var,
+                           bg=app_state.theme['bg'],
+                           fg=app_state.theme['fg'],
+                           selectcolor=app_state.theme['button'],
+                           activebackground=app_state.theme['bg'],
+                           command=lambda a=app_name: self.on_always_on_top_change(a)).pack(side='left', padx=5)
+
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
@@ -1013,6 +1066,11 @@ class VolumeControlWindow:
                                 app_state.remove_exception(app_name)
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
+
+    def on_always_on_top_change(self, app_name):
+        """Handle always on top checkbox changes"""
+        should_be_on_top = bool(self.always_on_top_vars[app_name].get())
+        app_state.save_always_on_top_app(app_name, should_be_on_top)
 
     def update_mute_status(self):
         """Update mute status and volume for all apps"""
