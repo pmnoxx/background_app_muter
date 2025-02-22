@@ -507,7 +507,7 @@ class AppState:
                                     user32.SetProcessDpiAwarenessContext(process_handle, -4)
                                     win32gui.SetWindowDisplayAffinity(hwnd, 0)
                                 except:
-                                    user32.SetProcessDPIAware()
+                                    pass
                                 
                                 # Get screen dimensions and calculate size/position
                                 monitor = win32api.MonitorFromWindow(hwnd, win32con.MONITOR_DEFAULTTONEAREST)
@@ -1471,6 +1471,9 @@ if __name__ == "__main__":
     if not pyuac.isUserAdmin():
         pyuac.runAsAdmin(wait=False)
         sys.exit(0)
+    import ctypes
+    user32 = ctypes.windll.user32
+    user32.SetProcessDPIAware()
     
     # Create global state instance
     app_state = AppState()
