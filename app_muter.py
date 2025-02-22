@@ -428,7 +428,7 @@ class AppState:
             print(f"Error restoring title bars: {e}")
 
     def check_all_window_states(self):
-        """Check and manage all window states (title bars, borders, sizes)"""
+        """Check and manage all window states"""
         try:
             def enum_windows_callback(hwnd, _):
                 try:
@@ -436,18 +436,21 @@ class AppState:
                     process = psutil.Process(pid)
                     process_name = os.path.basename(process.exe())
                     
-                    # Track first time we see this app
+                    # Track first time we see this process ID
                     current_time = time.time()
-                    if process_name not in self.app_start_times:
-                        self.app_start_times[process_name] = current_time
+                    process_key = f"{process_name}_{pid}"  # Use both name and PID as key
+                    if process_key not in self.app_start_times:
+                        self.app_start_times[process_key] = current_time
+                        if self.options["debug_mode"]:
+                            print(f"First time seeing {process_name} (PID: {pid})")
                     
-                    # Check if we need to wait before resizing
+                    # Check if we need to wait before managing this window
                     startup_delay = self.startup_delays.get(process_name, 0)
                     if startup_delay > 0:
-                        time_since_start = current_time - self.app_start_times[process_name]
+                        time_since_start = current_time - self.app_start_times[process_key]
                         if time_since_start < startup_delay:
                             if self.options["debug_mode"]:
-                                print(f"Waiting {startup_delay - time_since_start:.1f}s before resizing {process_name}")
+                                print(f"Waiting {startup_delay - time_since_start:.1f}s before managing {process_name} (PID: {pid})")
                             return True
                     
                     # Track if we need to update window
@@ -594,6 +597,16 @@ class AppState:
                 except Exception as e:
                     print(f"Window callback error: {e}")
                 return True
+
+            # Clean up old process entries
+            current_time = time.time()
+            for process_key in list(self.app_start_times.keys()):
+                try:
+                    name, pid_str = process_key.rsplit('_', 1)
+                    pid = int(pid_str)
+                    psutil.Process(pid)  # Will raise error if process no longer exists
+                except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
+                    del self.app_start_times[process_key]
 
             win32gui.EnumWindows(enum_windows_callback, None)
         except Exception as e:

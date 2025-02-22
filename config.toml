@@ -10,7 +10,7 @@ ALWAYS_ON_TOP_APPS = []
 "Awaken.exe" = "none"
 
 [WINDOW_PLACEMENTS]
-"HeavenBurnsRed.exe" = "top"
+"HeavenBurnsRed.exe" = "top_left"
 "StarRail.exe" = "top_left"
 "GF2_Exilium.exe" = "top_right"
 "AtelierResleriana.exe" = "top"
@@ -48,7 +48,8 @@ debug_mode = false
 [STARTUP_DELAYS]
 "P3R.exe" = 10
 "VIRTUA_UNLIMITED_PROJECT.exe" = 10
-"HeavenBurnsRed.exe" = 10
+"HeavenBurnsRed.exe" = 7
+"steam.exe" = 0
 
 [CUSTOM_RESOLUTION_APPS."StarRail.exe"]
 width = 1920
@@ -83,5 +84,5 @@ width = "fit_21_9"
 height = "fit_21_9"
 
 [CUSTOM_RESOLUTION_APPS."HeavenBurnsRed.exe"]
-width = "fit_19_5_9"
-height = "fit_19_5_9"
+width = 1280
+height = 720
