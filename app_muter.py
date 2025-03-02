@@ -199,7 +199,13 @@ class AppState:
         # Start combined window state checks
         self.root.after(self.options["window_check_interval"], self.check_all_window_states)
 
-        self.volume_control = None  # Add reference to volume control window
+        # Add volume control window state
+        self.volume_window_state = self.runtime.get("VOLUME_WINDOW_STATE", {
+            'geometry': None,
+            'maximized': False
+        })
+        
+        self.volume_control = None  # Reference to volume control window
 
     def setup_main_window(self):
         """Initialize main window settings"""
@@ -765,11 +771,63 @@ class AppState:
         except Exception as e:
             print(f"Error removing always on top: {e}")
 
+    def save_volume_window_state(self, geometry, maximized):
+        """Save volume control window position and size"""
+        self.volume_window_state = {
+            'geometry': geometry,
+            'maximized': maximized
+        }
+        self.runtime["VOLUME_WINDOW_STATE"] = self.volume_window_state
+        self.save_runtime()
+
 class VolumeControlWindow:
     def __init__(self, parent, app_state):
+        # Prevent multiple instances
+        if app_state.volume_control is not None:
+            if app_state.volume_control.window.winfo_exists():
+                app_state.volume_control.window.lift()  # Bring existing window to front
+                app_state.volume_control.window.focus_force()
+                return
+            else:
+                app_state.volume_control = None
+        
         self.window = Toplevel(parent)
         self.window.title("App Volume Control")
         self.window.configure(bg=app_state.theme['bg'])
+        
+        # Store reference in app_state
+        app_state.volume_control = self
+        
+        # Restore window position and size
+        if app_state.volume_window_state['geometry']:
+            self.window.geometry(app_state.volume_window_state['geometry'])
+        if app_state.volume_window_state['maximized']:
+            self.window.state('zoomed')
+        
+        # Save window state on changes
+        def save_window_state(event=None):
+            if self.window.state() == 'zoomed':  # Window is maximized
+                app_state.save_volume_window_state(
+                    getattr(self.window, 'last_normal_geometry', self.window.geometry()),
+                    True
+                )
+            else:
+                app_state.save_volume_window_state(
+                    self.window.geometry(),
+                    False
+                )
+                # Store current geometry for when window is unmaximized
+                self.window.last_normal_geometry = self.window.geometry()
+        
+        # Bind window events
+        self.window.bind("<Configure>", save_window_state)
+        
+        # Handle window close
+        def on_close():
+            app_state.volume_control = None
+            self.window.destroy()
+        
+        self.window.protocol("WM_DELETE_WINDOW", on_close)
         
         # Search frame
         search_frame = Frame(self.window, bg=app_state.theme['bg'])
@@ -1600,6 +1658,14 @@ class OptionsWindow:
                fg=app_state.theme['fg'],
                activebackground=app_state.theme['active']).pack(side='right', padx=5)
 
+def show_volume_control():
+    # Create window only if it doesn't exist
+    if app_state.volume_control is None or not app_state.volume_control.window.winfo_exists():
+        VolumeControlWindow(app_state.root, app_state)
+    else:
+        app_state.volume_control.window.lift()  # Bring existing window to front
+        app_state.volume_control.window.focus_force()
+
 if __name__ == "__main__":
 
     if not pyuac.isUserAdmin():
@@ -1728,7 +1794,12 @@ if __name__ == "__main__":
     bottom_frame.pack(fill='x', padx=10, pady=10)
     
     def show_volume_control():
-        app_state.volume_control = VolumeControlWindow(app_state.root, app_state)
+        # Create window only if it doesn't exist
+        if app_state.volume_control is None or not app_state.volume_control.window.winfo_exists():
+            VolumeControlWindow(app_state.root, app_state)
+        else:
+            app_state.volume_control.window.lift()  # Bring existing window to front
+            app_state.volume_control.window.focus_force()
 
     def show_options():
         OptionsWindow(app_state.root, app_state)
