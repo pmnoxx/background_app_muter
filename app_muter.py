@@ -10,7 +10,7 @@ import ctypes
 import win32api
 import pyuac
 import time
-from tkinter import Tk, Listbox, Button, Label, END, Checkbutton, IntVar, Scale, Toplevel, Frame, Entry, StringVar, OptionMenu, LabelFrame, messagebox
+from tkinter import Tk, Listbox, Button, Label, END, Checkbutton, IntVar, Scale, Toplevel, Frame, Entry, StringVar, OptionMenu, LabelFrame, messagebox, Scrollbar, Canvas
 
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
 
@@ -104,6 +104,22 @@ class AppState:
         # Define resolution presets by aspect ratio
         self.RESOLUTION_PRESETS = {
             "8k": {"width": 7680, "height": 4320},
+
+            # 3:4 options
+            "3:4 720p": {"width": 540, "height": 720},
+            "3:4 1080p": {"width": 810, "height": 1080},
+            "3:4 1440p": {"width": 1080, "height": 1440},
+            "3:4 Fit Screen": {"width": "fit_3_4", "height": "fit_3_4"},
+
+            "a:b 1080p": {"width": int(1080*3//4), "height": 1080},
+            "a:b 1440p": {"width": int(1440*3//4), "height": 1440},
+            
+            # 9:8 options
+            "9:8 720p": {"width": 810, "height": 720},
+            "9:8 1080p": {"width": 1215, "height": 1080},
+            "9:8 1440p": {"width": 1620, "height": 1440},
+            "9:8 Fit Screen": {"width": "fit_9_8", "height": "fit_9_8"},
+            
             # 16:9 options
             "16:9 720p": {"width": 1280, "height": 720},
             "16:9 1080p": {"width": 1920, "height": 1080},
@@ -522,7 +538,11 @@ class AppState:
                                 
                                 if isinstance(target_width, str) and target_width.startswith("fit_"):
                                     aspect_ratio = target_width.split("_", 1)[1]
-                                    if aspect_ratio == "16_9":
+                                    if aspect_ratio == "3_4":
+                                        ratio = 3/4
+                                    elif aspect_ratio == "9_8":
+                                        ratio = 9/8
+                                    elif aspect_ratio == "16_9":
                                         ratio = 16/9
                                     elif aspect_ratio == "19_5_9":
                                         ratio = 19.5/9
@@ -769,31 +789,128 @@ class VolumeControlWindow:
         self.apps_frame = Frame(self.window, bg=app_state.theme['bg'])
         self.apps_frame.pack(fill='both', expand=True, padx=5, pady=5)
         
+        # Initialize variables
         self.volume_vars = {}
         self.pid_match_vars = {}
         self.mute_labels = {}
         self.volume_labels = {}
-        self.hide_titlebar_vars = {}  # Add hide titlebar vars
-        self.maximize_vars = {}  # Add maximize vars
+        self.hide_titlebar_vars = {}
+        self.maximize_vars = {}
         self.resolution_vars = {}
-        self.preset_vars = {}  # Store resolution preset StringVars
-        self.placement_vars = {}  # Store placement StringVars
-        self.border_vars = {}  # Add border style vars
-        self.mute_vars = {}  # Add dictionary to store mute variables
-        self.always_on_top_vars = {}  # Add always on top vars
-        self.update_app_list()
+        self.preset_vars = {}
+        self.placement_vars = {}
+        self.border_vars = {}
+        self.mute_vars = {}
+        self.always_on_top_vars = {}
+        self.last_app_list = set()  # Initialize last_app_list
         
-        # Start periodic status updates
+        # Start periodic updates
+        self.update_app_list_periodic()
         self.update_mute_status()
         
     def filter_apps(self, *args):
         search_text = self.search_var.get().lower()
-        for widget in self.apps_frame.winfo_children():
-            widget.destroy()
-        
+        # Clear only inner frame widgets
+        if hasattr(self.apps_frame, 'inner'):
+            for widget in self.apps_frame.inner.winfo_children():
+                widget.destroy()
         self.update_app_list(search_text)
         
+    def update_app_list_periodic(self):
+        """Periodically check for new apps and update the list if needed"""
+        try:
+            # Get current apps
+            current_apps = set()
+            sessions = AudioUtilities.GetAllSessions()
+            for session in sessions:
+                if session.Process:
+                    try:
+                        process = psutil.Process(session.ProcessId)
+                        current_apps.add(os.path.basename(process.exe()))
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+            
+            # If app list changed, update the UI
+            if current_apps != self.last_app_list:
+                self.last_app_list = current_apps
+                search_text = self.search_var.get().lower()
+                
+                # Remember scroll position
+                scroll_pos = 0
+                if hasattr(self.apps_frame, 'vscrollbar'):
+                    scroll_pos = self.apps_frame.vscrollbar.get()[0]
+                
+                # Clear only the inner frame widgets
+                if hasattr(self.apps_frame, 'inner'):
+                    for widget in self.apps_frame.inner.winfo_children():
+                        widget.destroy()
+                
+                # Update the list
+                self.update_app_list(search_text)
+                
+                # Restore scroll position
+                if hasattr(self.apps_frame, 'vscrollbar'):
+                    self.apps_frame.vscrollbar.set(scroll_pos, scroll_pos + 0.1)
+            
+            # Schedule next check if window still exists
+            if self.window.winfo_exists():
+                self.window.after(app_state.options["list_update_interval"], 
+                                self.update_app_list_periodic)
+                
+        except Exception as e:
+            print(f"Error updating app list: {e}")
+            # Retry even if there was an error
+            if self.window.winfo_exists():
+                self.window.after(app_state.options["list_update_interval"], 
+                                self.update_app_list_periodic)
+
     def update_app_list(self, filter_text=""):
+        # Add scrollbar if not exists
+        if not hasattr(self.apps_frame, 'vscrollbar'):
+            self.apps_frame.vscrollbar = Scrollbar(self.apps_frame)
+            self.apps_frame.vscrollbar.pack(side='right', fill='y')
+            
+            # Create canvas and inner frame for scrolling
+            self.apps_frame.canvas = Canvas(self.apps_frame, 
+                                          bg=app_state.theme['bg'],
+                                          yscrollcommand=self.apps_frame.vscrollbar.set,
+                                          highlightthickness=0)  # Remove canvas border
+            self.apps_frame.canvas.pack(side='left', fill='both', expand=True)
+            
+            self.apps_frame.inner = Frame(self.apps_frame.canvas, 
+                                        bg=app_state.theme['bg'])
+            
+            # Create window ID for inner frame
+            self.window_id = self.apps_frame.canvas.create_window(
+                (0, 0),
+                window=self.apps_frame.inner,
+                anchor='nw',
+                width=self.apps_frame.canvas.winfo_width()  # Make inner frame full width
+            )
+            
+            # Configure scrolling
+            self.apps_frame.vscrollbar.config(command=self.apps_frame.canvas.yview)
+            
+            # Update scroll region when inner frame changes
+            def on_configure(event):
+                self.apps_frame.canvas.configure(scrollregion=self.apps_frame.canvas.bbox('all'))
+            self.apps_frame.inner.bind('<Configure>', on_configure)
+            
+            # Update inner frame width when canvas resizes
+            def on_canvas_configure(event):
+                self.apps_frame.canvas.itemconfig(self.window_id, width=event.width)
+            self.apps_frame.canvas.bind('<Configure>', on_canvas_configure)
+            
+            # Add mouse wheel scrolling
+            def on_mousewheel(event):
+                self.apps_frame.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            self.apps_frame.canvas.bind_all("<MouseWheel>", on_mousewheel)
+            
+            # Remove mousewheel binding when window is destroyed
+            def on_destroy(event):
+                self.apps_frame.canvas.unbind_all("<MouseWheel>")
+            self.window.bind("<Destroy>", on_destroy)
+
         sessions = AudioUtilities.GetAllSessions()
         
         for session in sessions:
@@ -807,7 +924,7 @@ class VolumeControlWindow:
                 if filter_text and filter_text not in app_name.lower():
                     continue
                 
-                frame = Frame(self.apps_frame, bg=app_state.theme['bg'])
+                frame = Frame(self.apps_frame.inner, bg=app_state.theme['bg'])
                 frame.pack(fill='x', padx=5, pady=2)
                 
                 # App name label
@@ -924,7 +1041,10 @@ class VolumeControlWindow:
                 
                 # Resolution preset dropdown
                 resolution_menu = OptionMenu(resolution_frame, preset_var, 
-                                          "8k", 
+                                          "8k",
+                                          "3:4 720p", "3:4 1080p", "3:4 1440p", "3:4 Fit Screen",
+                                          "a:b 1080p", "a:b 1440p",
+                                          "9:8 720p", "9:8 1080p", "9:8 1440p", "9:8 Fit Screen",
                                           "16:9 720p", "16:9 1080p", "16:9 1440p", "16:9 4K", "16:9 Fit Screen",
                                           "19.5:9 720p", "19.5:9 1080p", "19.5:9 1440p", "19.5:9 Fit Screen",
                                           "21:9 720p", "21:9 1080p", "21:9 1440p", "21:9 Fit Screen",
@@ -1030,7 +1150,28 @@ class VolumeControlWindow:
                 continue
 
     def on_volume_change(self, app_name, value):
-        app_state.save_app_volume(app_name, int(float(value)))
+        """Handle volume slider changes"""
+        try:
+            # Save to config
+            app_state.save_app_volume(app_name, int(float(value)))
+            
+            # Immediately apply volume change
+            sessions = AudioUtilities.GetAllSessions()
+            for session in sessions:
+                if session.Process:
+                    try:
+                        process = psutil.Process(session.ProcessId)
+                        if os.path.basename(process.exe()) == app_name:
+                            volume = session.SimpleAudioVolume
+                            if volume:
+                                current_volume = volume.GetMasterVolume()
+                                target_volume = float(value) / 100
+                                if abs(current_volume - target_volume) > 0.001:
+                                    volume.SetMasterVolume(target_volume, None)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+        except Exception as e:
+            print(f"Error changing volume: {e}")
 
     def on_pid_match_change(self, app_name):
         should_match_pid = bool(self.pid_match_vars[app_name].get())
@@ -1102,6 +1243,14 @@ class VolumeControlWindow:
                     if volume:
                         is_muted = volume.GetMute()
                         current_volume = int(volume.GetMasterVolume() * 100)
+                        
+                        # Update volume slider to match actual volume if different
+                        if app_name in self.volume_vars:
+                            target_volume = app_state.get_app_volume(app_name)
+                            if abs(current_volume - target_volume) > 1:  # 1% threshold
+                                volume.SetMasterVolume(float(target_volume) / 100, None)
+                                current_volume = target_volume
+                            self.volume_vars[app_name].set(current_volume)
                         
                         # Update mute checkbox state
                         if app_name in self.mute_vars:
@@ -1423,21 +1572,6 @@ class OptionsWindow:
                              fg=app_state.theme['fg'])
         ocr_frame.pack(fill='x', padx=5, pady=5)
         
-        # Selection buttons
-        selection_frame = Frame(ocr_frame, bg=app_state.theme['bg'])
-        selection_frame.pack(fill='x', padx=5, pady=2)
-        
-        Button(selection_frame, text="Select Name Area",
-               command=app_state.select_name_area,
-               bg=app_state.theme['button'],
-               fg=app_state.theme['fg'],
-               activebackground=app_state.theme['active']).pack(side='left', padx=5)
-        
-        Button(selection_frame, text="Select Message Area",
-               command=app_state.select_message_area,
-               bg=app_state.theme['button'],
-               fg=app_state.theme['fg'],
-               activebackground=app_state.theme['active']).pack(side='left', padx=5)
         
         # Buttons
         button_frame = Frame(main_frame, bg=app_state.theme['bg'])
