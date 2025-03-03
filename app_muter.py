@@ -13,6 +13,7 @@ import time
 from tkinter import Tk, Listbox, Button, Label, END, Checkbutton, IntVar, Scale, Toplevel, Frame, Entry, StringVar, OptionMenu, LabelFrame, messagebox, Scrollbar, Canvas
 
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
+from resize_widget import ResizeWidgetManager
 
 def read_config(filename):
     try:
@@ -100,6 +101,9 @@ class AppState:
 
         # Add always on top settings
         self.always_on_top_apps = self.config.get("ALWAYS_ON_TOP_APPS", [])
+
+        # Add resize widget settings
+        self.resize_widget_apps = self.config.get("RESIZE_WIDGET_APPS", [])
 
         # Define resolution presets by aspect ratio
         self.RESOLUTION_PRESETS = {
@@ -206,6 +210,9 @@ class AppState:
         })
         
         self.volume_control = None  # Reference to volume control window
+
+        # Add saved window positions
+        self.window_positions = self.config.get("WINDOW_POSITIONS", {})
 
     def setup_main_window(self):
         """Initialize main window settings"""
@@ -385,6 +392,8 @@ class AppState:
                 toml.dump(self.config, f)
         except Exception as e:
             print(f"Error saving config: {e}")
+            import traceback
+            traceback.print_exc()
 
     def save_app_volume(self, app_name, volume):
         """Save volume setting for specific app"""
@@ -487,7 +496,11 @@ class AppState:
                     
                     # Handle title bars and borders
                     if process_name in self.hide_titlebar_apps:
-                        style &= ~win32con.WS_CAPTION
+                        # Remove all title bar related styles
+                        style &= ~(win32con.WS_CAPTION | 
+                                 win32con.WS_SYSMENU |
+                                 win32con.WS_MINIMIZEBOX |
+                                 win32con.WS_MAXIMIZEBOX)
                         needs_style_update = True
                         
                         # Apply border style if set
@@ -497,6 +510,24 @@ class AppState:
                             
                             if border_style == "normal":
                                 style |= (win32con.WS_THICKFRAME | win32con.WS_BORDER)
+                                style &= ~win32con.WS_DLGFRAME
+                                style &= ~win32con.WS_OVERLAPPED
+                                style &= ~win32con.WS_CAPTION
+                                style &= ~win32con.WS_SYSMENU
+                                style &= ~win32con.WS_MINIMIZEBOX
+                                style &= ~win32con.WS_MAXIMIZEBOX
+                                style &= ~win32con.WS_TILEDWINDOW
+                                style &= ~win32con.WS_POPUP
+                                style &= ~win32con.WS_TILED
+                                style &= ~win32con.WS_OVERLAPPED
+                                style &= ~win32con.WS_CAPTION
+                                style &= ~win32con.WS_SYSMENU
+                                style &= ~win32con.WS_MINIMIZEBOX
+                                style &= ~win32con.WS_MAXIMIZEBOX
+                                # print style in hex
+                                print(f"Style: {hex(style)}")
+                                # style |= win32con.WS_POPUP
+                                style |= win32con.WS_THICKFRAME
                             elif border_style == "thin":
                                 style |= win32con.WS_BORDER
                             elif border_style == "dialog":
@@ -605,6 +636,7 @@ class AppState:
                     # Apply all window updates at once
                     if needs_update:
                         try:
+                            user32 = ctypes.windll.user32
                             user32.SetWindowPos(hwnd, 0, x, y, width, height, update_flags)
                             
                             # Verify size if we changed it
@@ -780,6 +812,194 @@ class AppState:
         self.runtime["VOLUME_WINDOW_STATE"] = self.volume_window_state
         self.save_runtime()
 
+    def save_resize_widget_app(self, app_name, should_show_widgets):
+        """Save resize widget setting for specific app"""
+        if should_show_widgets and app_name not in self.resize_widget_apps:
+            self.resize_widget_apps.append(app_name)
+        elif not should_show_widgets and app_name in self.resize_widget_apps:
+            self.resize_widget_apps.remove(app_name)
+        
+        self.config["RESIZE_WIDGET_APPS"] = self.resize_widget_apps
+        self.save_config()
+
+    def update_resize_widgets(self, hwnd, process_name):
+        """Update or create resize widgets for a window"""
+        try:
+            if self.options["debug_mode"]:
+                print(f"\nUpdating resize widgets for {process_name}")
+                print(f"Window handle: {hwnd}")
+            
+            # Get window rect
+            rect = win32gui.GetWindowRect(hwnd)
+            x, y, right, bottom = rect
+            width = right - x
+            height = bottom - y
+            
+            if self.options["debug_mode"]:
+                print(f"Window dimensions: {width}x{height} at ({x},{y})")
+
+            # Widget size
+            widget_size = 10
+            
+            # Create or update corner widgets
+            widget_key = f"{process_name}_{hwnd}"
+            
+            # Create new widgets if they don't exist for this window
+            if widget_key not in self.resize_widgets:
+                if self.options["debug_mode"]:
+                    print(f"Creating new resize widgets for {widget_key}")
+                
+                self.resize_widgets[widget_key] = []
+                
+                # Create widgets for each corner
+                corners = [
+                    ('nw', x, y),
+                    ('ne', right - widget_size, y),
+                    ('sw', x, bottom - widget_size),
+                    ('se', right - widget_size, bottom - widget_size)
+                ]
+                
+                for corner, wx, wy in corners:
+                    try:
+                        widget = Toplevel()
+                        widget.overrideredirect(True)
+                        widget.attributes('-topmost', True)
+                        widget.geometry(f"{widget_size}x{widget_size}+{wx}+{wy}")
+                        widget.configure(bg='gray')
+                        
+                        # Store initial positions for drag calculation
+                        widget.bind('<Button-1>', lambda e, w=widget, c=corner: self.start_resize(e, hwnd, w, c))
+                        widget.bind('<B1-Motion>', lambda e, w=widget, c=corner: self.do_resize(e, hwnd, w, c))
+                        
+                        self.resize_widgets[widget_key].append(widget)
+                        
+                        if self.options["debug_mode"]:
+                            print(f"Created {corner} widget at ({wx},{wy})")
+                    except Exception as e:
+                        print(f"Error creating {corner} widget: {e}")
+            else:
+                # Update existing widgets positions
+                if self.options["debug_mode"]:
+                    print(f"Updating existing widgets for {widget_key}")
+                
+                corners = [
+                    ('nw', x, y),
+                    ('ne', right - widget_size, y),
+                    ('sw', x, bottom - widget_size),
+                    ('se', right - widget_size, bottom - widget_size)
+                ]
+                
+                for widget, (corner, wx, wy) in zip(self.resize_widgets[widget_key], corners):
+                    try:
+                        if widget.winfo_exists():
+                            widget.geometry(f"{widget_size}x{widget_size}+{wx}+{wy}")
+                            if self.options["debug_mode"]:
+                                print(f"Updated {corner} widget to ({wx},{wy})")
+                        else:
+                            if self.options["debug_mode"]:
+                                print(f"Widget for {corner} no longer exists, recreating")
+                            # Recreate widget if it was destroyed
+                            new_widget = Toplevel()
+                            new_widget.overrideredirect(True)
+                            new_widget.attributes('-topmost', True)
+                            new_widget.geometry(f"{widget_size}x{widget_size}+{wx}+{wy}")
+                            new_widget.configure(bg='gray')
+                            new_widget.bind('<Button-1>', lambda e, w=new_widget, c=corner: self.start_resize(e, hwnd, w, c))
+                            new_widget.bind('<B1-Motion>', lambda e, w=new_widget, c=corner: self.do_resize(e, hwnd, w, c))
+                            self.resize_widgets[widget_key][self.resize_widgets[widget_key].index(widget)] = new_widget
+                    except Exception as e:
+                        print(f"Error updating {corner} widget: {e}")
+                    
+        except Exception as e:
+            print(f"Error in update_resize_widgets: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def save_window_position(self, app_name):
+        """Save current window position and size for an app"""
+        try:
+            positions = []
+            
+            def enum_windows_callback(hwnd, _):
+                try:
+                    if win32gui.IsWindowVisible(hwnd):
+                        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                        process = psutil.Process(pid)
+                        condition = os.path.basename(process.exe()) == app_name
+                        print(f"Enum window callback for {hwnd} {os.path.basename(process.exe())} == {app_name} condition: {condition}")
+                        if condition:
+                            rect = win32gui.GetWindowRect(hwnd)
+                            tup = win32gui.GetWindowPlacement(hwnd)
+                            is_maximized = tup[1] == win32con.SW_MAXIMIZE
+                            positions.append({
+                                'rect': list(rect),
+                                'maximized': is_maximized
+                            })
+                except Exception as e:
+                    print(f"Error in enum_windows_callback: {e}")
+                    import traceback
+                    traceback.print_exc()
+                return True
+            
+            win32gui.EnumWindows(enum_windows_callback, None)
+            
+            print(f"Positions: {positions}")    
+            if positions:
+                self.window_positions[app_name] = positions[0]
+                self.config["WINDOW_POSITIONS"] = self.window_positions
+                self.save_config()
+                return True
+            return False
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(f"Error saving window position: {e}")
+            return False
+
+    def restore_window_position(self, app_name):
+        """Restore saved window position and size for an app"""
+        try:
+            if app_name not in self.window_positions:
+                print(f"No saved positions for {app_name}")
+                return False
+                
+            saved_positions = self.window_positions[app_name]
+            restored = False
+            
+            def enum_windows_callback(hwnd, _):
+                try:
+                    if win32gui.IsWindowVisible(hwnd):
+                        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                        process = psutil.Process(pid)
+                        if os.path.basename(process.exe()) == app_name:
+                            # Find best matching saved position
+                            rect = saved_positions['rect']
+                            is_maximized = saved_positions['maximized']
+                            
+                            if is_maximized:
+                                win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+                            else:
+                                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                                win32gui.SetWindowPos(hwnd, 0,
+                                    rect[0], rect[1],
+                                    rect[2] - rect[0],
+                                    rect[3] - rect[1],
+                                    win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE)
+                            nonlocal restored
+                            restored = True
+                except Exception as e:
+                    print(f"Error in enum_windows_callback: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    pass
+                return True
+            
+            win32gui.EnumWindows(enum_windows_callback, None)
+            return restored
+        except Exception as e:
+            print(f"Error restoring window position: {e}")
+            return False
+
 class VolumeControlWindow:
     def __init__(self, parent, app_state):
         # Prevent multiple instances
@@ -791,12 +1011,15 @@ class VolumeControlWindow:
             else:
                 app_state.volume_control = None
         
+        # Store app_state reference
+        self.app_state = app_state
+        
+        # Initialize resize widget manager
+        self.resize_manager = ResizeWidgetManager(debug_mode=app_state.options["debug_mode"])
+        
         self.window = Toplevel(parent)
         self.window.title("App Volume Control")
         self.window.configure(bg=app_state.theme['bg'])
-        
-        # Store reference in app_state
-        app_state.volume_control = self
         
         # Restore window position and size
         if app_state.volume_window_state['geometry']:
@@ -861,6 +1084,7 @@ class VolumeControlWindow:
         self.mute_vars = {}
         self.always_on_top_vars = {}
         self.last_app_list = set()  # Initialize last_app_list
+        self.resize_widget_vars = {}
         
         # Start periodic updates
         self.update_app_list_periodic()
@@ -877,6 +1101,19 @@ class VolumeControlWindow:
     def update_app_list_periodic(self):
         """Periodically check for new apps and update the list if needed"""
         try:
+            # Update resize widgets for enabled apps
+            for app_name in self.app_state.resize_widget_apps:
+                def enum_windows_callback(hwnd, _):
+                    try:
+                        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                        process = psutil.Process(pid)
+                        if os.path.basename(process.exe()) == app_name and win32gui.IsWindowVisible(hwnd):
+                            self.resize_manager.create_or_update_widgets(app_name, hwnd)
+                    except:
+                        pass
+                    return True
+                win32gui.EnumWindows(enum_windows_callback, None)
+            
             # Get current apps
             current_apps = set()
             sessions = AudioUtilities.GetAllSessions()
@@ -1204,6 +1441,50 @@ class VolumeControlWindow:
                            activebackground=app_state.theme['bg'],
                            command=lambda a=app_name: self.on_always_on_top_change(a)).pack(side='left', padx=5)
 
+                # Add resize widget checkbox
+                resize_widget_var = IntVar(value=1 if app_name in app_state.resize_widget_apps else 0)
+                self.resize_widget_vars[app_name] = resize_widget_var
+                
+                Checkbutton(frame, text="Resize Widgets",
+                           variable=resize_widget_var,
+                           bg=app_state.theme['bg'],
+                           fg=app_state.theme['fg'],
+                           selectcolor=app_state.theme['button'],
+                           activebackground=app_state.theme['bg'],
+                           command=lambda a=app_name: self.on_resize_widget_change(a)).pack(side='left', padx=5)
+
+                # Add window position buttons frame
+                position_frame = Frame(frame, bg=app_state.theme['bg'])
+                position_frame.pack(side='left', padx=5)
+                
+                def make_save_position_handler(target_app):
+                    def handler():
+                        if self.app_state.save_window_position(target_app):
+                            messagebox.showinfo("Success", f"Window position saved for {target_app}")
+                        else:
+                            messagebox.showwarning("Warning", f"No visible windows found for {target_app}")
+                    return handler
+                
+                def make_restore_position_handler(target_app):
+                    def handler():
+                        if self.app_state.restore_window_position(target_app):
+                            messagebox.showinfo("Success", f"Window position restored for {target_app}")
+                        else:
+                            messagebox.showwarning("Warning", f"No saved position found for {target_app}")
+                    return handler
+                
+                Button(position_frame, text="Save Position",
+                       command=make_save_position_handler(app_name),
+                       bg=app_state.theme['button'],
+                       fg=app_state.theme['fg'],
+                       activebackground=app_state.theme['active']).pack(side='left', padx=2)
+                
+                Button(position_frame, text="Restore Position",
+                       command=make_restore_position_handler(app_name),
+                       bg=app_state.theme['button'],
+                       fg=app_state.theme['fg'],
+                       activebackground=app_state.theme['active']).pack(side='left', padx=2)
+
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
@@ -1284,6 +1565,32 @@ class VolumeControlWindow:
         should_be_on_top = bool(self.always_on_top_vars[app_name].get())
         app_state.save_always_on_top_app(app_name, should_be_on_top)
 
+    def on_resize_widget_change(self, app_name):
+        """Handle resize widget checkbox changes"""
+        should_show_widgets = bool(self.resize_widget_vars[app_name].get())
+        if self.app_state.options["debug_mode"]:
+            print(f"\nResize widgets {'enabled' if should_show_widgets else 'disabled'} for {app_name}")
+        
+        self.app_state.save_resize_widget_app(app_name, should_show_widgets)
+        
+        # If disabling, remove any existing widgets
+        if not should_show_widgets:
+            self.resize_manager.remove_widgets(app_name)
+        else:
+            # Find all windows for this app and create widgets
+            def enum_windows_callback(hwnd, _):
+                try:
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    process = psutil.Process(pid)
+                    if os.path.basename(process.exe()) == app_name and win32gui.IsWindowVisible(hwnd):
+                        self.resize_manager.create_or_update_widgets(app_name, hwnd)
+                except Exception as e:
+                    if self.app_state.options["debug_mode"]:
+                        print(f"Error in enum_windows_callback: {e}")
+                return True
+            
+            win32gui.EnumWindows(enum_windows_callback, None)
+
     def update_mute_status(self):
         """Update mute status and volume for all apps"""
         sessions = AudioUtilities.GetAllSessions()
@@ -1333,6 +1640,38 @@ class VolumeControlWindow:
         if not self.window.winfo_exists():
             return
         self.window.after(100, self.update_mute_status)
+
+    def start_resize(self, event, hwnd, widget, corner):
+        """Start window resize operation"""
+        widget.start_x = event.x_root
+        widget.start_y = event.y_root
+        widget.start_rect = win32gui.GetWindowRect(hwnd)
+
+    def do_resize(self, event, hwnd, widget, corner):
+        """Handle window resize operation"""
+        try:
+            dx = event.x_root - widget.start_x
+            dy = event.y_root - widget.start_y
+            x, y, right, bottom = widget.start_rect
+            
+            if corner == 'nw':
+                new_rect = (x + dx, y + dy, right, bottom)
+            elif corner == 'ne':
+                new_rect = (x, y + dy, right + dx, bottom)
+            elif corner == 'sw':
+                new_rect = (x + dx, y, right, bottom + dy)
+            elif corner == 'se':
+                new_rect = (x, y, right + dx, bottom + dy)
+            
+            # Apply new window position and size
+            win32gui.SetWindowPos(hwnd, 0, 
+                                new_rect[0], new_rect[1],
+                                new_rect[2] - new_rect[0],
+                                new_rect[3] - new_rect[1],
+                                win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE)
+                                
+        except Exception as e:
+            print(f"Error resizing window: {e}")
 
 # Function to check if a specific process ID is the foreground window
 def is_foreground_process(pid):
