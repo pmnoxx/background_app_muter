@@ -3,14 +3,26 @@ import win32con
 from tkinter import Toplevel
 
 class ResizeWidgetManager:
-    def __init__(self, debug_mode=False):
+    def __init__(self, debug_mode=False, widget_size=10):
         self.widgets = {}
         self.debug_mode = debug_mode
-        self.widget_size = 10
+        self.widget_size = widget_size
+        self.active_window = None
 
     def create_or_update_widgets(self, window_name, hwnd):
         """Create or update resize widgets for a window"""
         try:
+            # Check if window still exists and is visible
+            if not win32gui.IsWindow(hwnd) or not win32gui.IsWindowVisible(hwnd):
+                self.remove_widgets_for_hwnd(window_name, hwnd)
+                return
+
+            # Only show widgets for active window
+            active_hwnd = win32gui.GetForegroundWindow()
+            if active_hwnd != hwnd:
+                self.remove_widgets_for_hwnd(window_name, hwnd)
+                return
+
             if self.debug_mode:
                 print(f"\nUpdating resize widgets for {window_name}")
                 print(f"Window handle: {hwnd}")
@@ -93,8 +105,18 @@ class ResizeWidgetManager:
             import traceback
             traceback.print_exc()
 
+    def remove_widgets_for_hwnd(self, window_name, hwnd):
+        """Remove widgets for a specific window handle"""
+        widget_key = f"{window_name}_{hwnd}"
+        if widget_key in self.widgets:
+            if self.debug_mode:
+                print(f"Removing resize widgets for {widget_key}")
+            for widget in self.widgets[widget_key]:
+                widget.destroy()
+            del self.widgets[widget_key]
+
     def remove_widgets(self, window_name):
-        """Remove all resize widgets for a window"""
+        """Remove all resize widgets for a window name"""
         for key in list(self.widgets.keys()):
             if key.startswith(f"{window_name}_"):
                 if self.debug_mode:
@@ -102,6 +124,29 @@ class ResizeWidgetManager:
                 for widget in self.widgets[key]:
                     widget.destroy()
                 del self.widgets[key]
+
+    def update_all_widgets(self):
+        """Update all existing widgets with new size"""
+        for window_name in list(self.widgets.keys()):
+            try:
+                # Extract hwnd from the key
+                hwnd = int(window_name.split('_')[-1])
+                window_base_name = window_name.rsplit('_', 1)[0]
+                self.create_or_update_widgets(window_base_name, hwnd)
+            except Exception as e:
+                if self.debug_mode:
+                    print(f"Error updating widgets for {window_name}: {e}")
+
+    def cleanup_closed_windows(self):
+        """Remove widgets for windows that no longer exist"""
+        for window_name in list(self.widgets.keys()):
+            try:
+                hwnd = int(window_name.split('_')[-1])
+                if not win32gui.IsWindow(hwnd) or not win32gui.IsWindowVisible(hwnd):
+                    self.remove_widgets_for_hwnd(window_name.rsplit('_', 1)[0], hwnd)
+            except Exception as e:
+                if self.debug_mode:
+                    print(f"Error cleaning up widgets for {window_name}: {e}")
 
 class ResizeWidget:
     def __init__(self, hwnd, corner, position, size, debug_mode=False):

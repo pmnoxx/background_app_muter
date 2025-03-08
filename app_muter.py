@@ -194,6 +194,7 @@ class AppState:
             "volume_check_interval": 100,   # milliseconds
             "list_update_interval": 100,    # milliseconds
             "debug_mode": False,
+            "resize_widget_size": 10,       # pixels
         })
 
         # Add startup delay settings
@@ -1015,7 +1016,10 @@ class VolumeControlWindow:
         self.app_state = app_state
         
         # Initialize resize widget manager
-        self.resize_manager = ResizeWidgetManager(debug_mode=app_state.options["debug_mode"])
+        self.resize_manager = ResizeWidgetManager(
+            debug_mode=app_state.options["debug_mode"],
+            widget_size=app_state.options["resize_widget_size"]
+        )
         
         self.window = Toplevel(parent)
         self.window.title("App Volume Control")
@@ -1107,12 +1111,15 @@ class VolumeControlWindow:
                     try:
                         _, pid = win32process.GetWindowThreadProcessId(hwnd)
                         process = psutil.Process(pid)
-                        if os.path.basename(process.exe()) == app_name and win32gui.IsWindowVisible(hwnd):
+                        if os.path.basename(process.exe()) == app_name:
                             self.resize_manager.create_or_update_widgets(app_name, hwnd)
                     except:
                         pass
                     return True
                 win32gui.EnumWindows(enum_windows_callback, None)
+            
+            # Clean up widgets for closed windows
+            self.resize_manager.cleanup_closed_windows()
             
             # Get current apps
             current_apps = set()
@@ -1974,16 +1981,25 @@ class OptionsWindow:
         button_frame = Frame(main_frame, bg=app_state.theme['bg'])
         button_frame.pack(fill='x', pady=10)
         
+        
         def save_options():
             try:
                 app_state.options["window_check_interval"] = int(window_var.get())
                 app_state.options["volume_check_interval"] = int(volume_var.get())
                 app_state.options["list_update_interval"] = int(list_var.get())
                 app_state.options["debug_mode"] = bool(debug_var.get())
+                app_state.options["resize_widget_size"] = max(5, min(50, int(size_var.get())))  # Limit between 5-50 pixels
+                print(f"Resize widget size: {app_state.options['resize_widget_size']}")
                 app_state.save_options()
+                
+                # Update existing resize widgets if any
+                if hasattr(app_state.volume_control, 'resize_manager'):
+                    app_state.volume_control.resize_manager.widget_size = app_state.options["resize_widget_size"]
+                    app_state.volume_control.resize_manager.update_all_widgets()
+                
                 self.window.destroy()
             except ValueError:
-                messagebox.showerror("Error", "Please enter valid numbers for intervals")
+                messagebox.showerror("Error", "Please enter valid numbers for all fields")
         
         Button(button_frame, text="Save",
                command=save_options,
@@ -1996,6 +2012,27 @@ class OptionsWindow:
                bg=app_state.theme['button'],
                fg=app_state.theme['fg'],
                activebackground=app_state.theme['active']).pack(side='right', padx=5)
+
+        # Add resize widget settings section
+        resize_frame = LabelFrame(main_frame, text="Resize Widget Settings",
+                                bg=app_state.theme['bg'],
+                                fg=app_state.theme['fg'])
+        resize_frame.pack(fill='x', padx=5, pady=5)
+        
+        # Resize widget size
+        size_frame = Frame(resize_frame, bg=app_state.theme['bg'])
+        size_frame.pack(fill='x', padx=5, pady=2)
+        
+        Label(size_frame, text="Widget Size (pixels):",
+              bg=app_state.theme['bg'],
+              fg=app_state.theme['fg']).pack(side='left')
+        
+        size_var = StringVar(value=str(app_state.options["resize_widget_size"]))
+        size_entry = Entry(size_frame, textvariable=size_var,
+                          bg=app_state.theme['button'],
+                          fg=app_state.theme['fg'],
+                          width=10)
+        size_entry.pack(side='right')
 
 def show_volume_control():
     # Create window only if it doesn't exist
