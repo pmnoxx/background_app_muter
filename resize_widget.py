@@ -143,7 +143,8 @@ class MuteWidget:
 class ResizeWidgetManager:
     def __init__(self, debug_mode=False, widget_size=10, app_state=None):
         self.widgets = {}
-        self.mute_widgets = {}  # Add storage for mute widgets
+        self.mute_widgets = {}
+        self.move_widgets = {}  # Add storage for move widgets
         self.debug_mode = debug_mode
         self.widget_size = widget_size
         self.app_state = app_state
@@ -208,9 +209,22 @@ class ResizeWidgetManager:
                         
                         # Create mute widget next to NE corner
                         if corner == 'ne':
+                            # Create move widget at top center
+                            move_x = x + (width - self.widget_size) // 2
+                            move_y = y
+                            move_widget = MoveWidget(
+                                hwnd=hwnd,
+                                position=(move_x, move_y),
+                                size=self.widget_size,
+                                debug_mode=self.debug_mode,
+                                manager=self
+                            )
+                            self.move_widgets[widget_key] = move_widget
+                            
+                            # Create mute widget next to move widget
                             mute_widget = MuteWidget(
                                 hwnd=hwnd,
-                                position=(wx - self.widget_size * 2, wy),
+                                position=(move_x - self.widget_size * 2, move_y),
                                 size=self.widget_size,
                                 process_name=window_name,
                                 debug_mode=self.debug_mode,
@@ -240,23 +254,43 @@ class ResizeWidgetManager:
                         if widget.exists():
                             widget.update_position(wx, wy)
                             
-                            # Update mute widget position if this is the NE corner
-                            if corner == 'ne' and widget_key in self.mute_widgets:
-                                mute_widget = self.mute_widgets[widget_key]
-                                if mute_widget.exists():
-                                    mute_widget.update_position(wx - self.widget_size * 2, wy)
-                                    mute_widget.update_mute_state("Window position updated")
-                                else:
-                                    # Recreate mute widget if it was destroyed
-                                    self.mute_widgets[widget_key] = MuteWidget(
-                                        hwnd=hwnd,
-                                        position=(wx - self.widget_size * 2, wy),
-                                        size=self.widget_size,
-                                        process_name=window_name,
-                                        debug_mode=self.debug_mode,
-                                        app_state=self.app_state
-                                    )
-                                    self.mute_widgets[widget_key].update_mute_state("Widget recreated")
+                            # Update move and mute widget positions if this is the NE corner
+                            if corner == 'ne':
+                                move_x = x + (width - self.widget_size) // 2
+                                move_y = y
+                                
+                                # Update move widget
+                                if widget_key in self.move_widgets:
+                                    move_widget = self.move_widgets[widget_key]
+                                    if move_widget.exists():
+                                        move_widget.update_position(move_x, move_y)
+                                    else:
+                                        # Recreate move widget if it was destroyed
+                                        self.move_widgets[widget_key] = MoveWidget(
+                                            hwnd=hwnd,
+                                            position=(move_x, move_y),
+                                            size=self.widget_size,
+                                            debug_mode=self.debug_mode,
+                                            manager=self
+                                        )
+                                
+                                # Update mute widget
+                                if widget_key in self.mute_widgets:
+                                    mute_widget = self.mute_widgets[widget_key]
+                                    if mute_widget.exists():
+                                        mute_widget.update_position(move_x - self.widget_size * 2, move_y)
+                                        mute_widget.update_mute_state("Window position updated")
+                                    else:
+                                        # Recreate mute widget if it was destroyed
+                                        self.mute_widgets[widget_key] = MuteWidget(
+                                            hwnd=hwnd,
+                                            position=(move_x - self.widget_size * 2, move_y),
+                                            size=self.widget_size,
+                                            process_name=window_name,
+                                            debug_mode=self.debug_mode,
+                                            app_state=self.app_state
+                                        )
+                                        self.mute_widgets[widget_key].update_mute_state("Widget recreated")
                             
                             if self.debug_mode:
                                 print(f"Updated {corner} widget to ({wx},{wy})")
@@ -287,12 +321,16 @@ class ResizeWidgetManager:
 
         widget_key = f"{window_name}_{hwnd}"
         if widget_key in self.widgets:
-            print(f"remove widgets {widget_key}")
             if self.debug_mode:
                 print(f"Removing resize widgets for {widget_key}")
             for widget in self.widgets[widget_key]:
                 widget.destroy()
             del self.widgets[widget_key]
+            
+            # Remove move widget
+            if widget_key in self.move_widgets:
+                self.move_widgets[widget_key].destroy()
+                del self.move_widgets[widget_key]
             
             # Remove mute widget
             if widget_key in self.mute_widgets:
@@ -308,6 +346,11 @@ class ResizeWidgetManager:
                 for widget in self.widgets[key]:
                     widget.destroy()
                 del self.widgets[key]
+                
+                # Remove move widget
+                if key in self.move_widgets:
+                    self.move_widgets[key].destroy()
+                    del self.move_widgets[key]
                 
                 # Remove mute widget
                 if key in self.mute_widgets:
@@ -449,3 +492,103 @@ class ResizeWidget:
                                 
         except Exception as e:
             print(f"Error resizing window: {e}") 
+
+
+class MoveWidget:
+    def __init__(self, hwnd, position, size, manager: ResizeWidgetManager, debug_mode=False):
+        self.hwnd = hwnd
+        self.size = size
+        self.debug_mode = debug_mode
+        self.manager = manager
+        
+        self.window = Toplevel()
+        self.window.overrideredirect(True)
+        self.window.attributes('-topmost', True)
+        self.window.geometry(f"{size}x{size}+{position[0]}+{position[1]}")
+        self.window.configure(bg='#4b6eaf')  # Use a distinct color
+        
+        # Create tooltip window
+        self.tooltip = Toplevel()
+        self.tooltip.withdraw()  # Hide initially
+        self.tooltip.overrideredirect(True)
+        self.tooltip.attributes('-topmost', True)
+        self.tooltip.configure(bg='#2b2b2b')
+        self.tooltip_label = Label(self.tooltip, bg='#2b2b2b', fg='white',
+                                 text="Click and drag to move window",
+                                 font=('Arial', 8), padx=5, pady=3)
+        self.tooltip_label.pack()
+        
+        # Bind mouse events
+        self.window.bind('<Button-1>', self.start_move)
+        self.window.bind('<B1-Motion>', self.do_move)
+        self.window.bind('<Enter>', self.show_tooltip)
+        self.window.bind('<Leave>', self.hide_tooltip)
+        self.window.bind('<Motion>', self.update_tooltip_position)
+        
+        self.start_x = None
+        self.start_y = None
+        self.start_rect = None
+
+    def show_tooltip(self, event):
+        """Show the tooltip"""
+        if self.tooltip.state() == 'withdrawn':
+            self.update_tooltip_position(event)
+            self.tooltip.deiconify()
+
+    def hide_tooltip(self, event):
+        """Hide the tooltip"""
+        self.tooltip.withdraw()
+
+    def update_tooltip_position(self, event):
+        """Update tooltip position near the widget"""
+        x = self.window.winfo_rootx() + self.size + 5
+        y = self.window.winfo_rooty()
+        self.tooltip.geometry(f"+{x}+{y}")
+
+    def exists(self):
+        """Check if widget window still exists"""
+        return self.window.winfo_exists()
+
+    def update_position(self, x, y):
+        """Update widget position"""
+        self.window.geometry(f"{self.size}x{self.size}+{x}+{y}")
+
+    def destroy(self):
+        """Destroy the widget window"""
+        if self.exists():
+            self.tooltip.destroy()
+            self.window.destroy()
+
+    def start_move(self, event):
+        """Start window move operation"""
+        self.start_x = event.x_root
+        self.start_y = event.y_root
+        self.start_rect = win32gui.GetWindowRect(self.hwnd)
+        self.manager.is_resizing = True
+        if self.debug_mode:
+            print(f"Starting move from ({self.start_x}, {self.start_y})")
+
+    def do_move(self, event):
+        """Handle window move operation"""
+        try:
+            if self.start_x is None:
+                return
+            self.manager.is_resizing = False
+
+            dx = event.x_root - self.start_x
+            dy = event.y_root - self.start_y
+            x, y, right, bottom = self.start_rect
+            width = right - x
+            height = bottom - y
+            
+            # Move window to new position
+            win32gui.SetWindowPos(self.hwnd, 0,
+                                x + dx, y + dy, width, height,
+                                win32con.SWP_NOSIZE | win32con.SWP_NOZORDER)
+            
+            if self.debug_mode:
+                print(f"Moving window by ({dx}, {dy})")
+                
+        except Exception as e:
+            if self.debug_mode:
+                print(f"Error moving window: {e}")
