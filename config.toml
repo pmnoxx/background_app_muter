@@ -1,5 +1,7 @@
-RESIZE_WIDGET_APPS = [ "GF2_Exilium.exe", "HeavenBurnsRed.exe",]
+RESIZE_WIDGET_APPS = [ "HeavenBurnsRed.exe", "GF2_Exilium.exe",]
 HIDE_TITLEBAR_APPS = [ "vlc.exe", "GF2_Exilium.exe", "HeavenBurnsRed.exe",]
+AUTO_RESTORE_POSITIONS = []
+FORCE_MUTED_APPS = []
 
 [OPTIONS]
 window_check_interval = 1000
@@ -17,10 +19,13 @@ resize_widget_size = 15
 [BORDER_STYLES]
 "GF2_Exilium.exe" = "no_change"
 
+[APP_VOLUMES]
+"GF2_Exilium.exe" = 100
+
 [WINDOW_POSITIONS."HeavenBurnsRed.exe"]
 rect = [ 0, 0, 3840, 1771,]
 maximized = false
 
 [WINDOW_POSITIONS."GF2_Exilium.exe"]
-rect = [ 0, 0, 1280, 720,]
+rect = [ 0, -1, 1265, 1236,]
 maximized = false

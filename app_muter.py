@@ -210,10 +210,16 @@ class AppState:
             'maximized': False
         })
         
-        self.volume_control = None  # Reference to volume control window
+        self.volume_control: VolumeControlWindow = None  # Reference to volume control window
 
         # Add saved window positions
         self.window_positions = self.config.get("WINDOW_POSITIONS", {})
+
+        # Add auto-restore settings
+        self.auto_restore_positions = self.config.get("AUTO_RESTORE_POSITIONS", [])
+
+        # Add force mute settings
+        self.force_muted_apps = self.config.get("FORCE_MUTED_APPS", [])
 
     def setup_main_window(self):
         """Initialize main window settings"""
@@ -471,6 +477,15 @@ class AppState:
                     # Track first time we see this process ID
                     current_time = time.time()
                     process_key = f"{process_name}_{pid}"  # Use both name and PID as key
+                    
+                    # Handle auto-restore of window position
+                    if process_name in self.auto_restore_positions:
+                        if process_key not in self.app_start_times:
+                            # This is the first time we're seeing this window
+                            if self.options["debug_mode"]:
+                                print(f"Auto-restoring position for {process_name}")
+                            self.restore_window_position(process_name)
+                    
                     if process_key not in self.app_start_times:
                         self.app_start_times[process_key] = current_time
                         if self.options["debug_mode"]:
@@ -1001,6 +1016,30 @@ class AppState:
             print(f"Error restoring window position: {e}")
             return False
 
+    def save_auto_restore_position(self, app_name, should_auto_restore):
+        """Save auto-restore setting for specific app"""
+        if should_auto_restore and app_name not in self.auto_restore_positions:
+            self.auto_restore_positions.append(app_name)
+        elif not should_auto_restore and app_name in self.auto_restore_positions:
+            self.auto_restore_positions.remove(app_name)
+        
+        self.config["AUTO_RESTORE_POSITIONS"] = self.auto_restore_positions
+        self.save_config()
+
+    def save_force_mute_app(self, app_name, should_force_mute):
+        """Save force mute setting for specific app"""
+        if should_force_mute and app_name not in self.force_muted_apps:
+            self.force_muted_apps.append(app_name)
+        elif not should_force_mute and app_name in self.force_muted_apps:
+            self.force_muted_apps.remove(app_name)
+        
+        self.config["FORCE_MUTED_APPS"] = self.force_muted_apps
+        self.save_config()
+
+    def is_force_muted(self, app_name):
+        """Check if app is force muted"""
+        return app_name in self.force_muted_apps
+
 class VolumeControlWindow:
     def __init__(self, parent, app_state):
         # Prevent multiple instances
@@ -1018,7 +1057,8 @@ class VolumeControlWindow:
         # Initialize resize widget manager
         self.resize_manager = ResizeWidgetManager(
             debug_mode=app_state.options["debug_mode"],
-            widget_size=app_state.options["resize_widget_size"]
+            widget_size=app_state.options["resize_widget_size"],
+            app_state=app_state
         )
         
         self.window = Toplevel(parent)
@@ -1167,6 +1207,7 @@ class VolumeControlWindow:
                                 self.update_app_list_periodic)
 
     def update_app_list(self, filter_text=""):
+        print("update app list")
         # Add scrollbar if not exists
         if not hasattr(self.apps_frame, 'vscrollbar'):
             self.apps_frame.vscrollbar = Scrollbar(self.apps_frame)
@@ -1240,9 +1281,9 @@ class VolumeControlWindow:
                 status_frame.pack(side='left', padx=5)
                 
                 # Add mute checkbox with stored variable
-                mute_var = IntVar(value=0)
+                mute_var = IntVar(value=1 if app_name in self.app_state.force_muted_apps else 0)
                 self.mute_vars[app_name] = mute_var  # Store the mute variable
-                Checkbutton(status_frame, text="Mute",
+                Checkbutton(status_frame, text="Force Mute",
                            variable=mute_var,
                            bg=app_state.theme['bg'],
                            fg=app_state.theme['fg'],
@@ -1423,7 +1464,8 @@ class VolumeControlWindow:
                 
                 def save_delay(event, app=app_name, var=delay_var):
                     try:
-                        delay = int(var.get())
+                        print(f"Saving delay for {app}: {var.get()}")
+                        delay = float(var.get())
                         if delay >= 0:
                             app_state.startup_delays[app] = delay
                             app_state.config["STARTUP_DELAYS"] = app_state.startup_delays
@@ -1432,6 +1474,8 @@ class VolumeControlWindow:
                             var.set("0")
                     except ValueError:
                         var.set(str(app_state.startup_delays.get(app, 0)))
+                        # Open messagebox to user
+                        messagebox.showerror("Error", "Invalid delay value. Please enter a positive number.")
                 
                 delay_entry.bind('<Return>', save_delay)
                 delay_entry.bind('<FocusOut>', save_delay)
@@ -1492,6 +1536,16 @@ class VolumeControlWindow:
                        fg=app_state.theme['fg'],
                        activebackground=app_state.theme['active']).pack(side='left', padx=2)
 
+                # Add auto-restore checkbox
+                auto_restore_var = IntVar(value=1 if app_name in app_state.auto_restore_positions else 0)
+                Checkbutton(position_frame, text="Auto-Restore",
+                           variable=auto_restore_var,
+                           bg=app_state.theme['bg'],
+                           fg=app_state.theme['fg'],
+                           selectcolor=app_state.theme['button'],
+                           activebackground=app_state.theme['bg'],
+                           command=lambda a=app_name: self.on_auto_restore_change(a, auto_restore_var)).pack(side='left', padx=5)
+
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
@@ -1549,6 +1603,8 @@ class VolumeControlWindow:
     def on_mute_change(self, app_name):
         """Handle mute checkbox changes"""
         should_mute = self.mute_vars[app_name].get()
+        self.app_state.save_force_mute_app(app_name, should_mute)
+        
         sessions = AudioUtilities.GetAllSessions()
         for session in sessions:
             if session.Process:
@@ -1559,11 +1615,11 @@ class VolumeControlWindow:
                         if volume:
                             volume.SetMute(should_mute, None)
                             # Add app to exceptions if unmuting
-                            if not should_mute and app_name not in app_state.exceptions_list:
-                                app_state.add_exception(app_name)
+                            if not should_mute and app_name not in self.app_state.exceptions_list:
+                                self.app_state.add_exception(app_name)
                             # Remove from exceptions if muting
-                            elif should_mute and app_name in app_state.exceptions_list:
-                                app_state.remove_exception(app_name)
+                            elif should_mute and app_name in self.app_state.exceptions_list:
+                                self.app_state.remove_exception(app_name)
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
 
@@ -1624,9 +1680,11 @@ class VolumeControlWindow:
                                 current_volume = target_volume
                             self.volume_vars[app_name].set(current_volume)
                         
-                        # Update mute checkbox state
+                        # Update mute checkbox to match force mute state
                         if app_name in self.mute_vars:
-                            self.mute_vars[app_name].set(1 if is_muted else 0)
+                            force_muted = self.app_state.is_force_muted(app_name)
+                            if self.mute_vars[app_name].get() != force_muted:
+                                self.mute_vars[app_name].set(1 if force_muted else 0)
                         
                         # Update mute status
                         self.mute_labels[app_name].config(
@@ -1679,6 +1737,11 @@ class VolumeControlWindow:
                                 
         except Exception as e:
             print(f"Error resizing window: {e}")
+
+    def on_auto_restore_change(self, app_name, var):
+        """Handle auto-restore checkbox changes"""
+        should_auto_restore = bool(var.get())
+        self.app_state.save_auto_restore_position(app_name, should_auto_restore)
 
 # Function to check if a specific process ID is the foreground window
 def is_foreground_process(pid):
@@ -1790,6 +1853,7 @@ def mute_unmute_apps():
         try:
             process = psutil.Process(session.ProcessId)
             process_name = os.path.basename(process.exe())
+            process_exe = process.exe().split("/", -1).split("\\", -1)
         except:
             continue
 
@@ -1800,7 +1864,7 @@ def mute_unmute_apps():
         # Check if app has manual mute override
         manual_mute = None
         if hasattr(app_state, 'volume_control') and app_state.volume_control is not None:
-            if process_name in app_state.volume_control.mute_vars:
+            if process_exe in app_state.volume_control.mute_vars:
                 manual_mute = bool(app_state.volume_control.mute_vars[process_name].get())
 
         # If manual mute is set, respect it
@@ -1828,7 +1892,7 @@ def mute_unmute_apps():
 
             if volume.GetMute() == 0 and abs(volume.GetMasterVolume() - volume_value) > 0.001:
                 volume.SetMasterVolume(volume_value, None)
-
+            
             # Check if the process ID is the foreground process
             if app_state.force_mute_fg_var.get() == 1:
                 should_be_muted = True
