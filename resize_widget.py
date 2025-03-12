@@ -5,6 +5,7 @@ from pycaw.pycaw import AudioUtilities
 import os
 import win32process
 import psutil
+import keyboard  # Add keyboard import
 
 class MuteWidget:
     def __init__(self, hwnd, position, size, process_name, debug_mode=False, app_state=None):
@@ -214,12 +215,85 @@ class ResizeWidgetManager:
         self.widgets = {}
         self.mute_widgets = {}
         self.move_widgets = {}
-        self.minimize_widgets = {}  # Add storage for minimize widgets
+        self.minimize_widgets = {}
         self.debug_mode = debug_mode
         self.widget_size = widget_size
         self.app_state = app_state
         self.active_window = None
         self.is_resizing = False
+        self.widgets_visible = False
+        
+        # Start keyboard listener for Alt key
+        keyboard.on_press_key('alt', self.on_alt_press, suppress=False)
+        keyboard.on_release_key('alt', self.on_alt_release, suppress=False)
+
+    def on_alt_press(self, _):
+        """Handle Alt key press"""
+        if not self.widgets_visible and not self.is_resizing:
+            self.show_widgets()
+            self.widgets_visible = True
+            if self.debug_mode:
+                print("Showing widgets (Alt pressed)")
+
+    def on_alt_release(self, _):
+        """Handle Alt key release"""
+        if self.widgets_visible and not self.is_resizing:
+            self.hide_widgets()
+            self.widgets_visible = False
+            if self.debug_mode:
+                print("Hiding widgets (Alt released)")
+
+    def show_widgets(self):
+        """Show all widgets"""
+        try:
+            for widget_key in self.widgets:
+                for widget in self.widgets[widget_key]:
+                    if widget.exists():
+                        widget.window.deiconify()
+                
+                if widget_key in self.mute_widgets:
+                    mute_widget = self.mute_widgets[widget_key]
+                    if mute_widget.exists():
+                        mute_widget.window.deiconify()
+                
+                if widget_key in self.move_widgets:
+                    move_widget = self.move_widgets[widget_key]
+                    if move_widget.exists():
+                        move_widget.window.deiconify()
+                
+                if widget_key in self.minimize_widgets:
+                    minimize_widget = self.minimize_widgets[widget_key]
+                    if minimize_widget.exists():
+                        minimize_widget.window.deiconify()
+        except Exception as e:
+            if self.debug_mode:
+                print(f"Error showing widgets: {e}")
+
+    def hide_widgets(self):
+        """Hide all widgets"""
+        try:
+            for widget_key in self.widgets:
+                for widget in self.widgets[widget_key]:
+                    if widget.exists():
+                        widget.window.withdraw()
+                
+                if widget_key in self.mute_widgets:
+                    mute_widget = self.mute_widgets[widget_key]
+                    if mute_widget.exists():
+                        mute_widget.window.withdraw()
+                
+                if widget_key in self.move_widgets:
+                    move_widget = self.move_widgets[widget_key]
+                    if move_widget.exists():
+                        move_widget.window.withdraw()
+                
+                if widget_key in self.minimize_widgets:
+                    minimize_widget = self.minimize_widgets[widget_key]
+                    if minimize_widget.exists():
+                        minimize_widget.window.withdraw()
+        except Exception as e:
+            if self.debug_mode:
+                print(f"Error hiding widgets: {e}")
 
     def create_or_update_widgets(self, window_name, hwnd):
         """Create or update resize widgets for a window"""
@@ -229,7 +303,7 @@ class ResizeWidgetManager:
                 self.remove_widgets_for_hwnd(window_name, hwnd)
                 return
 
-            # Only show widgets for active window
+            # Only create/update widgets for active window
             active_hwnd = win32gui.GetForegroundWindow()
             if active_hwnd != hwnd:
                 self.remove_widgets_for_hwnd(window_name, hwnd)
@@ -403,6 +477,9 @@ class ResizeWidgetManager:
                     except Exception as e:
                         print(f"Error updating {corner} widget: {e}")
                     
+            # After creating or updating widgets, set their visibility based on current state
+            if not self.widgets_visible:
+                self.hide_widgets()
         except Exception as e:
             print(f"Error in create_or_update_widgets: {e}")
             import traceback
@@ -484,6 +561,18 @@ class ResizeWidgetManager:
             except Exception as e:
                 if self.debug_mode:
                     print(f"Error cleaning up widgets for {window_name}: {e}")
+
+    def cleanup(self):
+        """Clean up keyboard listeners when closing"""
+        try:
+            keyboard.unhook_all()
+        except Exception as e:
+            if self.debug_mode:
+                print(f"Error cleaning up keyboard hooks: {e}")
+        
+        # Remove all widgets
+        for window_name in list(self.widgets.keys()):
+            self.remove_widgets(window_name)
 
 class ResizeWidget:
     def __init__(self, hwnd, corner, position, size, debug_mode, manager:ResizeWidgetManager):
