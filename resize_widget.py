@@ -1,6 +1,6 @@
 import win32gui
 import win32con
-from tkinter import Toplevel, Label
+from tkinter import Toplevel, Label, Scale, DoubleVar
 from pycaw.pycaw import AudioUtilities
 import os
 import win32process
@@ -210,12 +210,160 @@ class MinimizeWidget:
             if self.debug_mode:
                 print(f"Error minimizing window: {e}")
 
+class VolumeWidget:
+    def __init__(self, hwnd, position, size, process_name, debug_mode=False, app_state=None):
+        self.hwnd = hwnd
+        self.size = size
+        self.process_name = process_name
+        self.debug_mode = debug_mode
+        self.app_state = app_state
+        self.is_dragging = False
+        
+        # Create main window
+        self.window = Toplevel()
+        self.window.overrideredirect(True)
+        self.window.attributes('-topmost', True)
+        self.window.configure(bg='#2b2b2b')
+        
+        # Make window wider for the slider
+        slider_width = size * 8
+        self.window.geometry(f"{slider_width}x{size}+{position[0]}+{position[1]}")
+        
+        # Create tooltip window
+        self.tooltip = Toplevel()
+        self.tooltip.withdraw()
+        self.tooltip.overrideredirect(True)
+        self.tooltip.attributes('-topmost', True)
+        self.tooltip.configure(bg='#2b2b2b')
+        self.tooltip_label = Label(self.tooltip, bg='#2b2b2b', fg='white',
+                                 font=('Arial', 8), padx=5, pady=3)
+        self.tooltip_label.pack()
+        
+        # Create volume slider
+        self.volume_var = DoubleVar()
+        self.slider = Scale(self.window, from_=0, to=100,
+                          orient='horizontal',
+                          variable=self.volume_var,
+                          command=self.on_volume_change,
+                          showvalue=False,
+                          length=slider_width-4,
+                          width=size-4,
+                          bd=0,
+                          bg='#4b6eaf',
+                          highlightthickness=0,
+                          troughcolor='#2b2b2b',
+                          activebackground='#4b6eaf')
+        self.slider.pack(padx=2, pady=2)
+        
+        # Bind mouse events
+        self.window.bind('<Enter>', self.show_tooltip)
+        self.window.bind('<Leave>', self.hide_tooltip)
+        self.window.bind('<Motion>', self.update_tooltip_position)
+        self.slider.bind('<Button-1>', self.start_volume_change)
+        self.slider.bind('<ButtonRelease-1>', self.end_volume_change)
+        
+        # Set initial volume
+        self.update_volume_state()
+
+    def show_tooltip(self, event):
+        """Show the tooltip"""
+        if self.tooltip.state() == 'withdrawn':
+            self.update_tooltip_position(event)
+            self.tooltip.deiconify()
+
+    def hide_tooltip(self, event):
+        """Hide the tooltip"""
+        self.tooltip.withdraw()
+
+    def update_tooltip_position(self, event):
+        """Update tooltip position near the widget"""
+        x = self.window.winfo_rootx() + self.size + 5
+        y = self.window.winfo_rooty()
+        self.tooltip.geometry(f"+{x}+{y}")
+
+    def exists(self):
+        """Check if widget window still exists"""
+        return self.window.winfo_exists()
+
+    def update_position(self, x, y):
+        """Update widget position"""
+        self.window.geometry(f"{self.size * 8}x{self.size}+{x}+{y}")
+
+    def destroy(self):
+        """Destroy the widget window"""
+        if self.exists():
+            self.tooltip.destroy()
+            self.window.destroy()
+
+    def start_volume_change(self, event):
+        """Handle start of volume change"""
+        self.is_dragging = True
+
+    def end_volume_change(self, event):
+        """Handle end of volume change"""
+        self.is_dragging = False
+        self.update_volume_state()
+
+    def update_volume_state(self):
+        """Update volume state and tooltip"""
+        try:
+            # Get exe name from window handle
+            _, pid = win32process.GetWindowThreadProcessId(self.hwnd)
+            process = psutil.Process(pid)
+            exe_name = os.path.basename(process.exe())
+            
+            # Get current volume from app state
+            current_volume = self.app_state.get_app_volume(exe_name) if self.app_state else 100
+            self.volume_var.set(current_volume)
+            
+            # Update tooltip
+            self.tooltip_label.config(text=f"Volume: {int(current_volume)}%")
+            
+            if self.debug_mode:
+                print(f"Updated volume state for {exe_name}: {current_volume}%")
+        except Exception as e:
+            if self.debug_mode:
+                print(f"Error updating volume state: {e}")
+            self.tooltip_label.config(text="Error getting volume")
+
+    def on_volume_change(self, value):
+        """Handle volume change"""
+        try:
+            if not self.is_dragging:
+                return
+                
+            volume = float(value)
+            # Get exe name from window handle
+            _, pid = win32process.GetWindowThreadProcessId(self.hwnd)
+            process = psutil.Process(pid)
+            exe_name = os.path.basename(process.exe())
+            
+            # Update volume in app state
+            if self.app_state:
+                self.app_state.save_app_volume(exe_name, volume)
+            
+            # Update audio session volume
+            sessions = AudioUtilities.GetAllSessions()
+            for session in sessions:
+                if session.Process and os.path.basename(session.Process.exe()) == exe_name:
+                    volume_interface = session.SimpleAudioVolume
+                    if volume_interface:
+                        volume_interface.SetMasterVolume(volume / 100.0, None)
+                        self.tooltip_label.config(text=f"Volume: {int(volume)}%")
+                        if self.debug_mode:
+                            print(f"Set volume for {exe_name} to {volume}%")
+                        break
+        except Exception as e:
+            if self.debug_mode:
+                print(f"Error changing volume: {e}")
+
 class ResizeWidgetManager:
     def __init__(self, debug_mode=False, widget_size=10, app_state=None):
         self.widgets = {}
         self.mute_widgets = {}
         self.move_widgets = {}
         self.minimize_widgets = {}
+        self.volume_widgets = {}  # Add storage for volume widgets
         self.debug_mode = debug_mode
         self.widget_size = widget_size
         self.app_state = app_state
@@ -265,6 +413,11 @@ class ResizeWidgetManager:
                     minimize_widget = self.minimize_widgets[widget_key]
                     if minimize_widget.exists():
                         minimize_widget.window.deiconify()
+                
+                if widget_key in self.volume_widgets:
+                    volume_widget = self.volume_widgets[widget_key]
+                    if volume_widget.exists():
+                        volume_widget.window.deiconify()
         except Exception as e:
             if self.debug_mode:
                 print(f"Error showing widgets: {e}")
@@ -291,6 +444,11 @@ class ResizeWidgetManager:
                     minimize_widget = self.minimize_widgets[widget_key]
                     if minimize_widget.exists():
                         minimize_widget.window.withdraw()
+                
+                if widget_key in self.volume_widgets:
+                    volume_widget = self.volume_widgets[widget_key]
+                    if volume_widget.exists():
+                        volume_widget.window.withdraw()
         except Exception as e:
             if self.debug_mode:
                 print(f"Error hiding widgets: {e}")
@@ -386,6 +544,17 @@ class ResizeWidgetManager:
                             )
                             self.mute_widgets[widget_key] = mute_widget
                             mute_widget.update_mute_state("Widget created")
+                            
+                            # Create volume widget (add after minimize widget)
+                            volume_widget = VolumeWidget(
+                                hwnd=hwnd,
+                                position=(move_x + self.widget_size * 4, move_y),  # Position after minimize widget
+                                size=self.widget_size,
+                                process_name=window_name,
+                                debug_mode=self.debug_mode,
+                                app_state=self.app_state
+                            )
+                            self.volume_widgets[widget_key] = volume_widget
                         
                         if self.debug_mode:
                             print(f"Created {corner} widget at ({wx},{wy})")
@@ -459,6 +628,23 @@ class ResizeWidgetManager:
                                             app_state=self.app_state
                                         )
                                         self.mute_widgets[widget_key].update_mute_state("Widget recreated")
+                                
+                                # Update volume widget
+                                if widget_key in self.volume_widgets:
+                                    volume_widget = self.volume_widgets[widget_key]
+                                    if volume_widget.exists():
+                                        volume_widget.update_position(move_x + self.widget_size * 4, move_y)
+                                        volume_widget.update_volume_state()
+                                    else:
+                                        # Recreate volume widget if it was destroyed
+                                        self.volume_widgets[widget_key] = VolumeWidget(
+                                            hwnd=hwnd,
+                                            position=(move_x + self.widget_size * 4, move_y),
+                                            size=self.widget_size,
+                                            process_name=window_name,
+                                            debug_mode=self.debug_mode,
+                                            app_state=self.app_state
+                                        )
                             
                             if self.debug_mode:
                                 print(f"Updated {corner} widget to ({wx},{wy})")
@@ -513,6 +699,11 @@ class ResizeWidgetManager:
             if widget_key in self.mute_widgets:
                 self.mute_widgets[widget_key].destroy()
                 del self.mute_widgets[widget_key]
+            
+            # Remove volume widget
+            if widget_key in self.volume_widgets:
+                self.volume_widgets[widget_key].destroy()
+                del self.volume_widgets[widget_key]
 
     def remove_widgets(self, window_name):
         """Remove all resize widgets for a window name"""
@@ -538,6 +729,11 @@ class ResizeWidgetManager:
                 if key in self.mute_widgets:
                     self.mute_widgets[key].destroy()
                     del self.mute_widgets[key]
+                
+                # Remove volume widget
+                if key in self.volume_widgets:
+                    self.volume_widgets[key].destroy()
+                    del self.volume_widgets[key]
 
     def update_all_widgets(self):
         """Update all existing widgets with new size"""

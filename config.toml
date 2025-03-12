@@ -1,7 +1,7 @@
 RESIZE_WIDGET_APPS = [ "MarySkelterFinale.exe", "GF2_Exilium.exe", "StarRail.exe", "HeavenBurnsRed.exe",]
 HIDE_TITLEBAR_APPS = [ "vlc.exe", "GF2_Exilium.exe", "HeavenBurnsRed.exe", "StarRail.exe",]
 AUTO_RESTORE_POSITIONS = []
-FORCE_MUTED_APPS = [ "GF2_Exilium.exe", "StarRail.exe",]
+FORCE_MUTED_APPS = [ "GF2_Exilium.exe",]
 ALWAYS_ON_TOP_APPS = []
 
 [OPTIONS]
@@ -22,6 +22,7 @@ resize_widget_size = 15
 [APP_VOLUMES]
 "GF2_Exilium.exe" = 100
 "HeavenBurnsRed.exe" = 46
+"StarRail.exe" = 28.0
 
 [STARTUP_DELAYS]
 "chrome.exe" = 0.0
