@@ -382,12 +382,52 @@ class AppState:
         except Exception as e:
             print(f"Error saving window state: {e}")
 
+    def sanitize_geometry(self, geometry_str):
+        """Ensure window geometry is within screen bounds"""
+        try:
+            # Parse geometry string
+            import re
+            match = re.match(r"(\d+)x(\d+)\+(-?\d+)\+(-?\d+)", geometry_str)
+            if not match:
+                return geometry_str
+            
+            width, height, x, y = map(int, match.groups())
+            
+            # Get screen dimensions using win32api
+            import win32api
+            screen_width = win32api.GetSystemMetrics(0)  # SM_CXSCREEN
+            screen_height = win32api.GetSystemMetrics(1)  # SM_CYSCREEN
+            
+            # Ensure window is not larger than screen
+            width = min(width, screen_width)
+            height = min(height, screen_height)
+            
+            # Ensure window is visible (at least partially) on screen
+            # Leave 100px margin to ensure window controls are accessible
+            margin = 100
+            x = max(margin - width, min(x, screen_width - margin))
+            y = max(margin - height, min(y, screen_height - margin))
+            
+            return f"{width}x{height}+{x}+{y}"
+        except Exception as e:
+            if self.debug_mode:
+                print(f"Error sanitizing geometry: {e}")
+            return geometry_str
+
     def restore_window_state(self):
-        """Restore saved window position and size"""
-        if self.window_state['geometry']:
-            self.root.geometry(self.window_state['geometry'])
-        if self.window_state['maximized']:
-            self.root.state('zoomed')
+        """Restore window position and size from saved state"""
+        try:
+            if 'WINDOW_STATE' in self.config:
+                state = self.config['WINDOW_STATE']
+                if 'geometry' in state:
+                    # Sanitize geometry before applying
+                    geometry = self.sanitize_geometry(state['geometry'])
+                    self.root.geometry(geometry)
+                if 'maximized' in state and state['maximized']:
+                    self.root.state('zoomed')
+        except Exception as e:
+            if self.debug_mode:
+                print(f"Error restoring window state: {e}")
 
     def save_config(self):
         """Save configuration settings to file"""
@@ -821,12 +861,17 @@ class AppState:
 
     def save_volume_window_state(self, geometry, maximized):
         """Save volume control window position and size"""
-        self.volume_window_state = {
-            'geometry': geometry,
-            'maximized': maximized
-        }
-        self.runtime["VOLUME_WINDOW_STATE"] = self.volume_window_state
-        self.save_runtime()
+        try:
+            volume_state = {
+                'maximized': maximized,
+                'geometry': geometry
+            }
+            self.volume_window_state = volume_state
+            self.runtime["VOLUME_WINDOW_STATE"] = volume_state
+            self.save_runtime()
+        except Exception as e:
+            if self.debug_mode:
+                print(f"Error saving volume window state: {e}")
 
     def save_resize_widget_app(self, app_name, should_show_widgets):
         """Save resize widget setting for specific app"""
@@ -1040,6 +1085,21 @@ class AppState:
         """Check if app is force muted"""
         return app_name in self.force_muted_apps
 
+    def restore_volume_window_state(self, volume_window):
+        """Restore volume control window position and size"""
+        try:
+            if 'VOLUME_WINDOW_STATE' in self.config:
+                state = self.config['VOLUME_WINDOW_STATE']
+                if 'geometry' in state:
+                    # Sanitize geometry before applying
+                    geometry = self.sanitize_geometry(state['geometry'])
+                    volume_window.geometry(geometry)
+                if 'maximized' in state and state['maximized']:
+                    volume_window.state('zoomed')
+        except Exception as e:
+            if self.debug_mode:
+                print(f"Error restoring volume window state: {e}")
+
 class VolumeControlWindow:
     def __init__(self, parent, app_state):
         # Prevent multiple instances
@@ -1066,25 +1126,33 @@ class VolumeControlWindow:
         self.window.configure(bg=app_state.theme['bg'])
         
         # Restore window position and size
-        if app_state.volume_window_state['geometry']:
-            self.window.geometry(app_state.volume_window_state['geometry'])
-        if app_state.volume_window_state['maximized']:
+        if app_state.volume_window_state.get('geometry'):
+            # Sanitize geometry before applying
+            geometry = app_state.sanitize_geometry(app_state.volume_window_state['geometry'])
+            self.window.geometry(geometry)
+            # Store the sanitized geometry as the last known normal geometry
+            self.window.last_normal_geometry = geometry
+        if app_state.volume_window_state.get('maximized', False):
             self.window.state('zoomed')
         
         # Save window state on changes
         def save_window_state(event=None):
+            if event and event.widget != self.window:
+                return
+                
             if self.window.state() == 'zoomed':  # Window is maximized
                 app_state.save_volume_window_state(
                     getattr(self.window, 'last_normal_geometry', self.window.geometry()),
                     True
                 )
             else:
+                current_geometry = self.window.geometry()
                 app_state.save_volume_window_state(
-                    self.window.geometry(),
+                    current_geometry,
                     False
                 )
                 # Store current geometry for when window is unmaximized
-                self.window.last_normal_geometry = self.window.geometry()
+                self.window.last_normal_geometry = current_geometry
         
         # Bind window events
         self.window.bind("<Configure>", save_window_state)
