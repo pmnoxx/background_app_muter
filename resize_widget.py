@@ -461,9 +461,23 @@ class ResizeWidgetManager:
                 self.remove_widgets_for_hwnd(window_name, hwnd)
                 return
 
-            # Only create/update widgets for active window
+            # Get active window
             active_hwnd = win32gui.GetForegroundWindow()
-            if active_hwnd != hwnd:
+            
+            # Check if active window is one of our widget windows
+            is_widget_window = False
+            try:
+                # Get class name of active window
+                class_name = win32gui.GetClassName(active_hwnd)
+                print(f"class_name:{class_name}")
+                # Tk widget windows have class name "Tk" or start with "Toplevel"
+                if class_name in ["Tk", "Toplevel", "TkTopLevel"]:
+                    is_widget_window = True
+            except:
+                pass
+
+            # Only hide widgets if active window is different and not a widget window
+            if active_hwnd != hwnd and not is_widget_window:
                 self.remove_widgets_for_hwnd(window_name, hwnd)
                 return
 
