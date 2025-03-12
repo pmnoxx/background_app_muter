@@ -6,6 +6,7 @@ import os
 import win32process
 import psutil
 import keyboard  # Add keyboard import
+import time
 
 class MuteWidget:
     def __init__(self, hwnd, position, size, process_name, debug_mode=False, app_state=None):
@@ -469,7 +470,6 @@ class ResizeWidgetManager:
             try:
                 # Get class name of active window
                 class_name = win32gui.GetClassName(active_hwnd)
-                print(f"class_name:{class_name}")
                 # Tk widget windows have class name "Tk" or start with "Toplevel"
                 if class_name in ["Tk", "Toplevel", "TkTopLevel"]:
                     is_widget_window = True
@@ -805,6 +805,12 @@ class ResizeWidget:
 
         self.start_x = None
         self.start_y = None
+        self.resizing = False
+        self.last_resize_time = 0
+        self.resize_delay = 1/60  # Limit to 60 FPS
+        self.last_mouse_x = None
+        self.last_mouse_y = None
+        self.pending_resize = None
 
     def exists(self):
         """Check if widget window still exists"""
@@ -821,42 +827,87 @@ class ResizeWidget:
             self.window.destroy()
 
     def start_resize(self, event):
-        self.manager.is_resizing = True
         """Start window resize operation"""
+        self.manager.is_resizing = True
         self.start_x = event.x_root
         self.start_y = event.y_root
         self.start_rect = win32gui.GetWindowRect(self.hwnd)
-        print(f"starting resize {self.corner}")
+        self.resizing = True
+        if self.debug_mode:
+            print(f"starting resize {self.corner}")
 
-    def end_resize(self, event):
-        self.manager.is_resizing = False
-        """Handle end of resize operation"""
-        print("ending resize")
-        try:
-            if self.manager:
-                # Get the window name from the manager's widgets
-                window_name = None
-                for key, widgets in self.manager.widgets.items():
-                    if any(widget is self for widget in widgets):
-                        window_name = key.rsplit('_', 1)[0]
-                        break
+    def apply_resize(self, new_rect):
+        """Apply resize with rate limiting"""
+        current_time = time.time()
+        if current_time - self.last_resize_time >= self.resize_delay:
+            try:
+                # Apply new window position and size
+                win32gui.SetWindowPos(self.hwnd, 0, 
+                                    new_rect[0], new_rect[1],
+                                    new_rect[2] - new_rect[0],
+                                    new_rect[3] - new_rect[1],
+                                    win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE)
                 
-                if window_name:
-                    # Update all widgets for this window
-                    self.manager.create_or_update_widgets(window_name, self.hwnd)
-        except Exception as e:
-            print(f"Error in end_resize: {e}")
+                # Update widget positions
+                if self.manager:
+                    rect = win32gui.GetWindowRect(self.hwnd)
+                    x, y, right, bottom = rect
+                    corners = [
+                        ('nw', x, y),
+                        ('ne', right - self.size, y),
+                        ('sw', x, bottom - self.size),
+                        ('se', right - self.size, bottom - self.size)
+                    ]
+                    
+                    # Find our window in the manager's widgets
+                    for key, widgets in self.manager.widgets.items():
+                        if any(widget is self for widget in widgets):
+                            # Update corner widgets
+                            for widget, (corner, wx, wy) in zip(widgets, corners):
+                                if widget is not self:  # Don't update the widget being dragged
+                                    widget.update_position(wx, wy)
+                            
+                            # Update control widgets
+                            move_x = x + (right - x - self.size) // 2
+                            move_y = y
+                            
+                            if key in self.manager.move_widgets:
+                                self.manager.move_widgets[key].update_position(move_x, move_y)
+                            if key in self.manager.mute_widgets:
+                                self.manager.mute_widgets[key].update_position(move_x - self.size * 2, move_y)
+                            if key in self.manager.minimize_widgets:
+                                self.manager.minimize_widgets[key].update_position(move_x + self.size * 2, move_y)
+                            if key in self.manager.volume_widgets:
+                                self.manager.volume_widgets[key].update_position(move_x + self.size * 4, move_y)
+                            break
+                
+                self.last_resize_time = current_time
+                self.pending_resize = None
+            except Exception as e:
+                if self.debug_mode:
+                    print(f"Error applying resize: {e}")
 
     def do_resize(self, event):
         """Handle window resize operation"""
         try:
-            print("do resize")
-            if self.start_x is None:
-                print("start_x is not set")
+            if not self.resizing or self.start_x is None:
                 return
 
-            dx = event.x_root - self.start_x
-            dy = event.y_root - self.start_y
+            # Get current mouse position instead of using event coordinates
+            current_x = self.window.winfo_pointerx()
+            current_y = self.window.winfo_pointery()
+
+            # Skip if mouse hasn't moved since last resize
+            if (self.last_mouse_x == current_x and 
+                self.last_mouse_y == current_y):
+                return
+
+            # Update last known mouse position
+            self.last_mouse_x = current_x
+            self.last_mouse_y = current_y
+
+            dx = current_x - self.start_x
+            dy = current_y - self.start_y
             x, y, right, bottom = self.start_rect
             
             if self.corner == 'nw':
@@ -868,35 +919,31 @@ class ResizeWidget:
             elif self.corner == 'se':
                 new_rect = (x, y, right + dx, bottom + dy)
             
-            # Apply new window position and size
-            win32gui.SetWindowPos(self.hwnd, 0, 
-                                new_rect[0], new_rect[1],
-                                new_rect[2] - new_rect[0],
-                                new_rect[3] - new_rect[1],
-                                win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE)
+            # Store the pending resize
+            self.pending_resize = new_rect
             
-            # Update widget positions during drag
-            if self.manager:
-                rect = win32gui.GetWindowRect(self.hwnd)
-                x, y, right, bottom = rect
-                corners = [
-                    ('nw', x, y),
-                    ('ne', right - self.size, y),
-                    ('sw', x, bottom - self.size),
-                    ('se', right - self.size, bottom - self.size)
-                ]
-                
-                # Find our window in the manager's widgets
-                for key, widgets in self.manager.widgets.items():
-                    if any(widget is self for widget in widgets):
-                        for widget, (corner, wx, wy) in zip(widgets, corners):
-                            if widget is not self:  # Don't update the widget being dragged
-                                widget.update_position(wx, wy)
-                        break
-                                
+            # Apply immediately if enough time has passed
+            current_time = time.time()
+            if current_time - self.last_resize_time >= self.resize_delay:
+                self.apply_resize(new_rect)
+            
         except Exception as e:
-            print(f"Error resizing window: {e}") 
+            if self.debug_mode:
+                print(f"Error in do_resize: {e}")
 
+    def end_resize(self, event):
+        """Handle end of resize operation"""
+        self.resizing = False
+        self.manager.is_resizing = False
+        # Clear mouse position tracking
+        self.last_mouse_x = None
+        self.last_mouse_y = None
+        # Apply any final pending resize
+        if self.pending_resize:
+            self.apply_resize(self.pending_resize)
+        self.pending_resize = None
+        if self.debug_mode:
+            print("ending resize")
 
 class MoveWidget:
     def __init__(self, hwnd, position, size, manager: ResizeWidgetManager, debug_mode=False):

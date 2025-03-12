@@ -22,7 +22,7 @@ resize_widget_size = 15
 [APP_VOLUMES]
 "GF2_Exilium.exe" = 100
 "HeavenBurnsRed.exe" = 46
-"StarRail.exe" = 34.0
+"StarRail.exe" = 100.0
 
 [STARTUP_DELAYS]
 "chrome.exe" = 0.0

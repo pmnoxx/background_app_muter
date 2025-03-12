@@ -8,7 +8,7 @@ mute_foreground_when_background = 0
 lock = 0
 
 [WINDOW_STATE]
-geometry = "1039x974+358+1910"
+geometry = "1039x761+5+2317"
 maximized = false
 
 [VOLUME_WINDOW_STATE]
