@@ -140,11 +140,81 @@ class MuteWidget:
             if self.debug_mode:
                 print(f"Error toggling mute: {e}")
 
+class MinimizeWidget:
+    def __init__(self, hwnd, position, size, debug_mode=False):
+        self.hwnd = hwnd
+        self.size = size
+        self.debug_mode = debug_mode
+        
+        self.window = Toplevel()
+        self.window.overrideredirect(True)
+        self.window.attributes('-topmost', True)
+        self.window.geometry(f"{size}x{size}+{position[0]}+{position[1]}")
+        self.window.configure(bg='#ffd43b')  # Yellow color to distinguish it
+        
+        # Create tooltip window
+        self.tooltip = Toplevel()
+        self.tooltip.withdraw()  # Hide initially
+        self.tooltip.overrideredirect(True)
+        self.tooltip.attributes('-topmost', True)
+        self.tooltip.configure(bg='#2b2b2b')
+        self.tooltip_label = Label(self.tooltip, bg='#2b2b2b', fg='white',
+                                 text="Click to minimize window",
+                                 font=('Arial', 8), padx=5, pady=3)
+        self.tooltip_label.pack()
+        
+        # Bind mouse events
+        self.window.bind('<Button-1>', self.minimize_window)
+        self.window.bind('<Enter>', self.show_tooltip)
+        self.window.bind('<Leave>', self.hide_tooltip)
+        self.window.bind('<Motion>', self.update_tooltip_position)
+
+    def show_tooltip(self, event):
+        """Show the tooltip"""
+        if self.tooltip.state() == 'withdrawn':
+            self.update_tooltip_position(event)
+            self.tooltip.deiconify()
+
+    def hide_tooltip(self, event):
+        """Hide the tooltip"""
+        self.tooltip.withdraw()
+
+    def update_tooltip_position(self, event):
+        """Update tooltip position near the widget"""
+        x = self.window.winfo_rootx() + self.size + 5
+        y = self.window.winfo_rooty()
+        self.tooltip.geometry(f"+{x}+{y}")
+
+    def exists(self):
+        """Check if widget window still exists"""
+        return self.window.winfo_exists()
+
+    def update_position(self, x, y):
+        """Update widget position"""
+        self.window.geometry(f"{self.size}x{self.size}+{x}+{y}")
+
+    def destroy(self):
+        """Destroy the widget window"""
+        if self.exists():
+            self.tooltip.destroy()
+            self.window.destroy()
+
+    def minimize_window(self, event=None):
+        """Minimize the window"""
+        try:
+            win32gui.ShowWindow(self.hwnd, win32con.SW_MINIMIZE)
+            if self.debug_mode:
+                print(f"Minimized window {self.hwnd}")
+        except Exception as e:
+            if self.debug_mode:
+                print(f"Error minimizing window: {e}")
+
 class ResizeWidgetManager:
     def __init__(self, debug_mode=False, widget_size=10, app_state=None):
         self.widgets = {}
         self.mute_widgets = {}
-        self.move_widgets = {}  # Add storage for move widgets
+        self.move_widgets = {}
+        self.minimize_widgets = {}  # Add storage for minimize widgets
         self.debug_mode = debug_mode
         self.widget_size = widget_size
         self.app_state = app_state
@@ -207,11 +277,21 @@ class ResizeWidgetManager:
                         )
                         self.widgets[widget_key].append(widget)
                         
-                        # Create mute widget next to NE corner
+                        # Create mute, move, and minimize widgets next to NE corner
                         if corner == 'ne':
-                            # Create move widget at top center
                             move_x = x + (width - self.widget_size) // 2
                             move_y = y
+                            
+                            # Create minimize widget
+                            minimize_widget = MinimizeWidget(
+                                hwnd=hwnd,
+                                position=(move_x + self.widget_size * 2, move_y),
+                                size=self.widget_size,
+                                debug_mode=self.debug_mode
+                            )
+                            self.minimize_widgets[widget_key] = minimize_widget
+                            
+                            # Create move widget
                             move_widget = MoveWidget(
                                 hwnd=hwnd,
                                 position=(move_x, move_y),
@@ -221,7 +301,7 @@ class ResizeWidgetManager:
                             )
                             self.move_widgets[widget_key] = move_widget
                             
-                            # Create mute widget next to move widget
+                            # Create mute widget
                             mute_widget = MuteWidget(
                                 hwnd=hwnd,
                                 position=(move_x - self.widget_size * 2, move_y),
@@ -254,10 +334,24 @@ class ResizeWidgetManager:
                         if widget.exists():
                             widget.update_position(wx, wy)
                             
-                            # Update move and mute widget positions if this is the NE corner
+                            # Update move, mute, and minimize widget positions if this is the NE corner
                             if corner == 'ne':
                                 move_x = x + (width - self.widget_size) // 2
                                 move_y = y
+                                
+                                # Update minimize widget
+                                if widget_key in self.minimize_widgets:
+                                    minimize_widget = self.minimize_widgets[widget_key]
+                                    if minimize_widget.exists():
+                                        minimize_widget.update_position(move_x + self.widget_size * 2, move_y)
+                                    else:
+                                        # Recreate minimize widget if it was destroyed
+                                        self.minimize_widgets[widget_key] = MinimizeWidget(
+                                            hwnd=hwnd,
+                                            position=(move_x + self.widget_size * 2, move_y),
+                                            size=self.widget_size,
+                                            debug_mode=self.debug_mode
+                                        )
                                 
                                 # Update move widget
                                 if widget_key in self.move_widgets:
@@ -321,11 +415,17 @@ class ResizeWidgetManager:
 
         widget_key = f"{window_name}_{hwnd}"
         if widget_key in self.widgets:
+            print(f"Removing resize widgets for {widget_key}")
             if self.debug_mode:
                 print(f"Removing resize widgets for {widget_key}")
             for widget in self.widgets[widget_key]:
                 widget.destroy()
             del self.widgets[widget_key]
+            
+            # Remove minimize widget
+            if widget_key in self.minimize_widgets:
+                self.minimize_widgets[widget_key].destroy()
+                del self.minimize_widgets[widget_key]
             
             # Remove move widget
             if widget_key in self.move_widgets:
@@ -346,6 +446,11 @@ class ResizeWidgetManager:
                 for widget in self.widgets[key]:
                     widget.destroy()
                 del self.widgets[key]
+                
+                # Remove minimize widget
+                if key in self.minimize_widgets:
+                    self.minimize_widgets[key].destroy()
+                    del self.minimize_widgets[key]
                 
                 # Remove move widget
                 if key in self.move_widgets:
@@ -521,6 +626,7 @@ class MoveWidget:
         # Bind mouse events
         self.window.bind('<Button-1>', self.start_move)
         self.window.bind('<B1-Motion>', self.do_move)
+        self.window.bind('<ButtonRelease-1>', self.end_move)
         self.window.bind('<Enter>', self.show_tooltip)
         self.window.bind('<Leave>', self.hide_tooltip)
         self.window.bind('<Motion>', self.update_tooltip_position)
@@ -573,7 +679,6 @@ class MoveWidget:
         try:
             if self.start_x is None:
                 return
-            self.manager.is_resizing = False
 
             dx = event.x_root - self.start_x
             dy = event.y_root - self.start_y
@@ -592,3 +697,6 @@ class MoveWidget:
         except Exception as e:
             if self.debug_mode:
                 print(f"Error moving window: {e}")
+
+    def end_move(self, event):
+        self.manager.is_resizing = False

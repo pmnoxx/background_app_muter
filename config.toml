@@ -1,7 +1,8 @@
-RESIZE_WIDGET_APPS = [ "GF2_Exilium.exe", "HeavenBurnsRed.exe", "chrome.exe",]
-HIDE_TITLEBAR_APPS = [ "vlc.exe", "GF2_Exilium.exe", "HeavenBurnsRed.exe",]
+RESIZE_WIDGET_APPS = [ "MarySkelterFinale.exe", "GF2_Exilium.exe", "StarRail.exe", "HeavenBurnsRed.exe",]
+HIDE_TITLEBAR_APPS = [ "vlc.exe", "GF2_Exilium.exe", "HeavenBurnsRed.exe", "StarRail.exe",]
 AUTO_RESTORE_POSITIONS = []
-FORCE_MUTED_APPS = [ "HeavenBurnsRed.exe",]
+FORCE_MUTED_APPS = [ "GF2_Exilium.exe", "StarRail.exe",]
+ALWAYS_ON_TOP_APPS = []
 
 [OPTIONS]
 window_check_interval = 1000
@@ -13,23 +14,32 @@ resize_widget_size = 15
 [WINDOW_PLACEMENTS]
 "GF2_Exilium.exe" = "top_left"
 "HeavenBurnsRed.exe" = "top"
-
-[CUSTOM_RESOLUTION_APPS]
+"StarRail.exe" = "top"
 
 [BORDER_STYLES]
 "GF2_Exilium.exe" = "no_change"
 
 [APP_VOLUMES]
 "GF2_Exilium.exe" = 100
+"HeavenBurnsRed.exe" = 46
 
 [STARTUP_DELAYS]
 "chrome.exe" = 0.0
 "HeavenBurnsRed.exe" = 7.0
+"GF2_Exilium.exe" = 8.0
+
+[CUSTOM_RESOLUTION_APPS."GF2_Exilium.exe"]
+width = 1280
+height = 720
 
 [WINDOW_POSITIONS."HeavenBurnsRed.exe"]
 rect = [ 949, 512, 2869, 1592,]
 maximized = false
 
 [WINDOW_POSITIONS."GF2_Exilium.exe"]
-rect = [ 0, -1, 1265, 1236,]
+rect = [ 15, 1, 1843, 1071,]
+maximized = false
+
+[WINDOW_POSITIONS."StarRail.exe"]
+rect = [ 39, 234, 1875, 1485,]
 maximized = false

@@ -1,4 +1,4 @@
-CURRENT_EXCEPTIONS = [ "firefox.exe", "msedge.exe", "chrome.exe", "python3.9.exe", "NVIDIA Overlay.exe", "vlc.exe", "Microsoft.Media.Player.exe", "nikke.exe", "HeavenBurnsRed.exe",]
+CURRENT_EXCEPTIONS = [ "firefox.exe", "msedge.exe", "chrome.exe", "python3.9.exe", "NVIDIA Overlay.exe", "vlc.exe", "Microsoft.Media.Player.exe", "nikke.exe", "HeavenBurnsRed.exe", "GF2_Exilium.exe", "Game.exe",]
 
 [SETTINGS]
 mute_last_app = 1
@@ -8,9 +8,9 @@ mute_foreground_when_background = 0
 lock = 0
 
 [WINDOW_STATE]
-geometry = "2808x648+1088+886"
+geometry = "1039x974+358+1910"
 maximized = false
 
 [VOLUME_WINDOW_STATE]
-geometry = "2721x469+161+1689"
+geometry = "2203x436+86+2497"
 maximized = false
